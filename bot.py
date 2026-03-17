@@ -179,10 +179,8 @@ async def check_tasks():
         for r in task["reminders"]:
             if r in task["notified"]:
                 continue
-
             reminder_time = task["due"] - datetime.timedelta(days=r)
-            # 今が通知時間を過ぎていない場合はスキップ
-            if now >= reminder_time and now < reminder_time + datetime.timedelta(seconds=30):
+            if now >= reminder_time:
                 channel = bot.get_channel(task["channel_id"])
                 if channel:
                     await channel.send(f"⏰ {reminder_label(r)}のリマインド\n📌 {task['task']}")
