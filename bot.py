@@ -1,136 +1,108 @@
+import os
 import discord
 from discord.ext import commands, tasks
-import datetime
-import json
-import os
-
+from flask import Flask
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import datetime
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+# -----------------------
+# Flask: Koyeb用ヘルスチェック
+# -----------------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "OK", 200
 
 def run_web():
-    server = HTTPServer(("0.0.0.0", 8000), Handler)
-    server.serve_forever()
+    port = int(os.environ.get("PORT", 8000))  # KoyebのPORT環境変数に対応
+    app.run(host="0.0.0.0", port=port)
 
 threading.Thread(target=run_web, daemon=True).start()
 
-
+# -----------------------
+# Discord Bot設定
+# -----------------------
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-TASK_FILE = "tasks.json"
-
-# -----------------------
-# データ読み書き
-# -----------------------
-def load_tasks():
-    if not os.path.exists(TASK_FILE):
-        return []
-    with open(TASK_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_tasks(tasks):
-    with open(TASK_FILE, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
+tasks_list = []  # 永続化なし
 
 # -----------------------
 # タスク追加
 # -----------------------
 @bot.command()
-async def add(ctx, date: str, *, task_name):
-    tasks = load_tasks()
+async def add(ctx, date: str, time: str, *, task_name):
+    """
+    例: !add 2026-03-18 21:30 タスク名
+    """
+    try:
+        due = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        await ctx.send("❌ 日付・時間は YYYY-MM-DD HH:MM 形式で入力してください")
+        return
 
     task = {
         "task": task_name,
-        "date": date,
-        "notified": False,
-        "channel_id": ctx.channel.id
+        "due": due,
+        "channel_id": ctx.channel.id,
+        "notified": False
     }
-
-    tasks.append(task)
-    save_tasks(tasks)
-
-    await ctx.send(f"✅ タスク登録: {task_name}（期限: {date}）")
+    tasks_list.append(task)
+    await ctx.send(f"✅ タスク登録: {task_name}（期限: {due}）")
 
 # -----------------------
 # タスク一覧
 # -----------------------
-@bot.command()
-async def add(ctx, date: str, *, task_name):
-    try:
-        datetime.datetime.strptime(date, "%Y-%m-%d")
-    except:
-        await ctx.send("❌ 日付は YYYY-MM-DD 形式で入力してね")
-        return
-
-    tasks = load_tasks()
-
-    task = {
-        "task": task_name,
-        "date": date,
-        "notified": False,
-        "channel_id": ctx.channel.id
-    }
-
-    tasks.append(task)
-    save_tasks(tasks)
-
-    await ctx.send(f"✅ タスク登録: {task_name}（期限: {date}）")
-    
 @bot.command(name="tasks")
 async def show_list(ctx):
-    tasks = load_tasks()
-
-    if not tasks:
+    if not tasks_list:
         await ctx.send("タスクなし")
         return
 
     msg = ""
-    for i, t in enumerate(tasks):
-        msg += f"{i+1}. {t['task']}（{t['date']}）\n"
+    for i, t in enumerate(tasks_list):
+        status = "✅通知済" if t["notified"] else "⌛未通知"
+        msg += f"{i+1}. {t['task']}（期限: {t['due'].strftime('%Y-%m-%d %H:%M')}） {status}\n"
 
     await ctx.send(msg)
 
 # -----------------------
-# リマインド処理
+# タスク削除
 # -----------------------
-@tasks.loop(minutes=1)
-async def check_tasks():
-    tasks = load_tasks()
-    now = datetime.datetime.now()
+@bot.command()
+async def delete(ctx, index: int):
+    if 0 < index <= len(tasks_list):
+        removed = tasks_list.pop(index-1)
+        await ctx.send(f"❌ タスク削除: {removed['task']}")
+    else:
+        await ctx.send("❌ 無効な番号です")
 
-    for task in tasks:
+# -----------------------
+# リマインダー処理
+# -----------------------
+@tasks.loop(seconds=30)
+async def check_tasks():
+    now = datetime.datetime.now()
+    for task in tasks_list:
         if task["notified"]:
             continue
-
-        try:
-            due = datetime.datetime.strptime(task["date"], "%Y-%m-%d")
-        except:
-            continue
-
-        # 当日になったら通知
-        if now.date() == due.date():
+        if now >= task["due"]:
             channel = bot.get_channel(task["channel_id"])
             if channel:
                 await channel.send(f"⏰ 期限です！\n📌 {task['task']}")
-
             task["notified"] = True
-
-    save_tasks(tasks)
 
 # -----------------------
 # 起動時
 # -----------------------
 @bot.event
 async def on_ready():
-    print("Bot起動")
+    print(f"{bot.user} が起動しました！")
     check_tasks.start()
 
-bot.run(os.getenv("TOKEN"))
+# -----------------------
+# Bot起動
+# -----------------------
+bot.run(os.environ.get("TOKEN"))  # Koyebの環境変数TOKENを使用
