@@ -6,6 +6,16 @@ from flask import Flask
 import threading
 import datetime
 
+import pytz
+import datetime
+
+# 日本時間タイムゾーンを取得
+JST = pytz.timezone("Asia/Tokyo")
+
+# 現在時刻
+now = datetime.datetime.now(JST)
+print(now)  # 例: 2026-03-18 21:30:00+09:00
+
 # -----------------------
 # Flask: Koyeb用ヘルスチェック
 # -----------------------
@@ -45,7 +55,8 @@ else:
 @app_commands.describe(date="YYYY-MM-DD形式", time="HH:MM形式", task_name="タスク内容")
 async def add(interaction: discord.Interaction, date: str, time: str, task_name: str):
     try:
-        due = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        due_naive = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        due = JST.localize(due_naive)  # タイムゾーン付きdatetimeに変換
     except ValueError:
         await interaction.response.send_message("❌ 日付・時間は YYYY-MM-DD HH:MM 形式で入力してください", ephemeral=True)
         return
@@ -92,7 +103,7 @@ async def delete(interaction: discord.Interaction, index: int):
 # -----------------------
 @tasks.loop(seconds=30)
 async def check_tasks():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(JST)
     for task in tasks_list:
         if task["notified"]:
             continue
