@@ -5,6 +5,44 @@ from discord import app_commands
 from flask import Flask
 import threading
 import datetime
+import json
+
+DATA_FILE = "tasks.json"
+
+# -----------------------
+# JSON保存関数
+# -----------------------
+def save_tasks():
+    data = []
+    for t in tasks_list:
+        data.append({
+            "task": t["task"],
+            "due": t["due"].isoformat(),
+            "channel_id": t["channel_id"],
+            "reminders": t["reminders"],
+            "notified": t["notified"]
+        })
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# 読み込み関数
+def load_tasks():
+    global tasks_list
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+
+        tasks_list = []
+        for t in data:
+            tasks_list.append({
+                "task": t["task"],
+                "due": datetime.datetime.fromisoformat(t["due"]),
+                "channel_id": t["channel_id"],
+                "reminders": t["reminders"],
+                "notified": t["notified"]
+            })
+    except FileNotFoundError:
+        tasks_list = []
 
 # -----------------------
 # Flask: Koyeb用ヘルスチェック
@@ -200,6 +238,9 @@ async def edit(
         f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}"
     )
 
+    # 保存
+    save_tasks()
+
 # -----------------------
 # タスク追加
 # -----------------------
@@ -280,6 +321,8 @@ async def add(
         "notified": []
     }
     tasks_list.append(task)
+    save_tasks()
+
     await interaction.response.send_message(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
         f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}"
@@ -316,10 +359,14 @@ async def check_tasks():
                     f"🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
                 )
             task["notified"].append(next_reminder)
+            save_tasks()
 
     for task in to_remove:
         tasks_list.remove(task)
         print(f"🗑️ タスク削除（期限+1か月経過）: {task['task']}")
+
+    if to_remove:
+        save_tasks()
 
 # -----------------------
 # タスク削除
@@ -332,6 +379,8 @@ async def delete(interaction: discord.Interaction, index: int):
         return
 
     task = tasks_list.pop(index - 1)
+
+    save_tasks()
 
     await interaction.response.send_message(
         f"🗑️ 削除しました\n📌 {task['task']}"
@@ -349,6 +398,8 @@ async def done(interaction: discord.Interaction, index: int):
 
     task = tasks_list.pop(index - 1)
 
+    save_tasks()
+
     await interaction.response.send_message(
         f"✅ 完了！\n📌 {task['task']}"
     )
@@ -365,6 +416,7 @@ async def on_ready():
         await tree.sync()
         print("グローバルスラッシュコマンドを同期しました")
     print(f"{bot.user} が起動しました！")
+    load_tasks()
     check_tasks.start()
 
 # -----------------------
