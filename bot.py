@@ -6,16 +6,6 @@ from flask import Flask
 import threading
 import datetime
 
-import pytz
-import datetime
-
-# 日本時間タイムゾーンを取得
-JST = pytz.timezone("Asia/Tokyo")
-
-# 現在時刻
-now = datetime.datetime.now(JST)
-print(now)  # 例: 2026-03-18 21:30:00+09:00
-
 # -----------------------
 # Flask: Koyeb用ヘルスチェック
 # -----------------------
@@ -48,17 +38,32 @@ if GUILD_ID:
 else:
     GUILD_OBJ = None  # グローバルコマンド
 
+# JST タイムゾーン設定
+JST = datetime.timezone(datetime.timedelta(hours=9))
+
 # -----------------------
 # タスク追加
 # -----------------------
 @tree.command(name="add", description="タスクを追加します")
-@app_commands.describe(date="YYYY-MM-DD形式", time="HH:MM形式", task_name="タスク内容")
+@app_commands.describe(date="MMDDまたはYYYYMMDD形式", time="HHMM形式", task_name="タスク内容")
 async def add(interaction: discord.Interaction, date: str, time: str, task_name: str):
     try:
-        due_naive = datetime.datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-        due = JST.localize(due_naive)  # タイムゾーン付きdatetimeに変換
+        now = datetime.datetime.now(JST)
+        # 西暦省略対応
+        if len(date) == 4:  # MMDD形式
+            year = now.year
+            due_naive = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M")
+            if due_naive < now:  # 過去日なら翌年
+                due_naive = due_naive.replace(year=year+1)
+        elif len(date) == 8:  # YYYYMMDD形式
+            due_naive = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M")
+        else:
+            raise ValueError("日付形式が不正です")
+        due = due_naive.replace(tzinfo=JST)
     except ValueError:
-        await interaction.response.send_message("❌ 日付・時間は YYYY-MM-DD HH:MM 形式で入力してください", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ 日付・時間は MMDD HHMM または YYYYMMDD HHMM 形式で入力してください", ephemeral=True
+        )
         return
 
     task = {
