@@ -143,9 +143,17 @@ async def show_list(interaction: discord.Interaction):
 
     msg = ""
     for i, t in enumerate(tasks_list):
-        notified_str = ", ".join([str(r) for r in t["notified"]])
-        status = f"✅通知済({notified_str})" if t["notified"] else "⌛未通知"
-        msg += f"{i+1}. {t['task']}（期限: {t['due'].strftime('%Y-%m-%d %H:%M')}） {status}\n"
+        # 通知済みのリマインドをラベル化
+        notified_labels = [reminder_label(r) for r in t["notified"]]
+        status = f"✅通知済({', '.join(notified_labels)})" if t["notified"] else "⌛未通知"
+
+        # 登録されているリマインドもラベルで表示
+        all_reminders_labels = [reminder_label(r) for r in t["reminders"]]
+        msg += (
+            f"{i+1}. {t['task']}（期限: {t['due'].strftime('%Y-%m-%d %H:%M')}）\n"
+            f"　リマインド: {', '.join(all_reminders_labels)}\n"
+            f"　状態: {status}\n"
+        )
 
     await interaction.response.send_message(msg)
 
@@ -162,7 +170,7 @@ async def delete(interaction: discord.Interaction, index: int):
         await interaction.response.send_message("❌ 無効な番号です", ephemeral=True)
 
 # -----------------------
-# リマインダー処理
+# リマインダー処理（修正版）
 # -----------------------
 @tasks.loop(seconds=30)
 async def check_tasks():
@@ -171,8 +179,10 @@ async def check_tasks():
         for r in task["reminders"]:
             if r in task["notified"]:
                 continue
+
             reminder_time = task["due"] - datetime.timedelta(days=r)
-            if now >= reminder_time:
+            # 今が通知時間を過ぎていない場合はスキップ
+            if now >= reminder_time and now < reminder_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(task["channel_id"])
                 if channel:
                     await channel.send(f"⏰ {reminder_label(r)}のリマインド\n📌 {task['task']}")
