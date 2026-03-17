@@ -75,6 +75,8 @@ def reminder_label(days: float) -> str:
         return "24時間前"
     elif days >= 1/8:
         return "3時間前"
+    elif days == 0:
+        return "当日"
     else:
         return f"{int(days*86400)}秒前"
 
@@ -181,7 +183,10 @@ async def check_tasks():
         if now >= reminder_time:
             channel = bot.get_channel(task["channel_id"])
             if channel:
-                await channel.send(f"⏰ {reminder_label(next_reminder)}のリマインド\n📌 {task['task']}")
+                await channel.send(
+                    f"⏰ {task['task']}\n"
+                    f"🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
+                )
             task["notified"].append(next_reminder)
 
     for task in to_remove:
