@@ -1,14 +1,9 @@
-# Python環境にする
-FROM python:3.11
+FROM python:3.11-slim
 
-# 作業ディレクトリ
 WORKDIR /app
+COPY . /app
 
-# ファイルコピー
-COPY . .
-
-# 依存関係インストール
+RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Bot起動
 CMD ["python", "bot.py"]
