@@ -5,10 +5,10 @@ FROM node:18
 WORKDIR /app
 
 # app フォルダ内の内容をコンテナの /app にコピー
-COPY app/ .
+COPY . .
 
 # 依存関係のインストール
-RUN npm install
+RUN pip install -r requirements.txt
 
 # ポートを開ける（Koyeb用）、使用してるポート番号にすること。
 EXPOSE 3000
