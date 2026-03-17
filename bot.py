@@ -4,8 +4,26 @@ import datetime
 import json
 import os
 
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_web():
+    server = HTTPServer(("0.0.0.0", 8000), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_web, daemon=True).start()
+
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 TASK_FILE = "tasks.json"
 
@@ -45,7 +63,29 @@ async def add(ctx, date: str, *, task_name):
 # タスク一覧
 # -----------------------
 @bot.command()
-async def list(ctx):
+async def add(ctx, date: str, *, task_name):
+    try:
+        datetime.datetime.strptime(date, "%Y-%m-%d")
+    except:
+        await ctx.send("❌ 日付は YYYY-MM-DD 形式で入力してね")
+        return
+
+    tasks = load_tasks()
+
+    task = {
+        "task": task_name,
+        "date": date,
+        "notified": False,
+        "channel_id": ctx.channel.id
+    }
+
+    tasks.append(task)
+    save_tasks(tasks)
+
+    await ctx.send(f"✅ タスク登録: {task_name}（期限: {date}）")
+    
+@bot.command(name="tasks")
+async def show_list(ctx):
     tasks = load_tasks()
 
     if not tasks:
@@ -70,10 +110,13 @@ async def check_tasks():
         if task["notified"]:
             continue
 
-        due = datetime.datetime.strptime(task["date"], "%Y-%m-%d")
+        try:
+            due = datetime.datetime.strptime(task["date"], "%Y-%m-%d")
+        except:
+            continue
 
         # 当日になったら通知
-        if now.date() >= due.date():
+        if now.date() == due.date():
             channel = bot.get_channel(task["channel_id"])
             if channel:
                 await channel.send(f"⏰ 期限です！\n📌 {task['task']}")
