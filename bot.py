@@ -36,7 +36,7 @@ def load_tasks():
         for t in data:
             tasks_list.append({
                 "task": t["task"],
-                "due": datetime.datetime.fromisoformat(t["due"]),
+                "due": datetime.datetime.fromisoformat(t["due"]).astimezone(JST),
                 "channel_id": t["channel_id"],
                 "reminders": t["reminders"],
                 "notified": t["notified"]
@@ -122,7 +122,7 @@ def reminder_label(days: float) -> str:
 # タスク一覧
 # -----------------------
 
-@tree.command(name="list", description="タスク一覧を表示")
+@tree.command(name="list", description="タスク一覧を表示", guild=GUILD_OBJ)
 async def list_tasks(interaction: discord.Interaction):
     if not tasks_list:
         await interaction.response.send_message("📭 タスクはありません")
@@ -142,7 +142,7 @@ async def list_tasks(interaction: discord.Interaction):
 # タスク編集
 # -----------------------
     
-@tree.command(name="edit", description="タスクを編集します")
+@tree.command(name="edit", description="タスクを編集します", guild=GUILD_OBJ)
 @app_commands.describe(
     index="編集するタスク番号",
     date="MMDDまたはYYYYMMDD（省略可）",
@@ -244,7 +244,7 @@ async def edit(
 # -----------------------
 # タスク追加
 # -----------------------
-@tree.command(name="add", description="タスクを追加します")
+@tree.command(name="add", description="タスクを追加します", guild=GUILD_OBJ)
 @app_commands.describe(
     date="MMDDまたはYYYYMMDD形式",
     time="HHMM形式",
@@ -371,7 +371,7 @@ async def check_tasks():
 # -----------------------
 # タスク削除
 # -----------------------
-@tree.command(name="delete", description="タスク削除")
+@tree.command(name="delete", description="タスク削除", guild=GUILD_OBJ)
 @app_commands.describe(index="削除するタスク番号")
 async def delete(interaction: discord.Interaction, index: int):
     if not (0 < index <= len(tasks_list)):
@@ -389,7 +389,7 @@ async def delete(interaction: discord.Interaction, index: int):
 # -----------------------
 # タスク完了扱い
 # -----------------------
-@tree.command(name="done", description="タスク完了")
+@tree.command(name="done", description="タスク完了", guild=GUILD_OBJ)
 @app_commands.describe(index="完了したタスク番号")
 async def done(interaction: discord.Interaction, index: int):
     if not (0 < index <= len(tasks_list)):
