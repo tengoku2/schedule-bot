@@ -176,14 +176,13 @@ async def check_tasks():
     to_remove = []
 
     for task in tasks_list:
-        # リマインド通知
         for r in task["reminders"]:
             if r in task["notified"]:
                 continue
 
             reminder_time = task["due"] - datetime.timedelta(days=r)
-            # 当日になったら通知（過去分はスキップ）
-            if now >= reminder_time and now < reminder_time + datetime.timedelta(seconds=30):
+            # 過ぎていれば通知
+            if now >= reminder_time:
                 channel = bot.get_channel(task["channel_id"])
                 if channel:
                     await channel.send(f"⏰ {reminder_label(r)}のリマインド\n📌 {task['task']}")
