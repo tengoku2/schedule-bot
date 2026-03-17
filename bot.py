@@ -53,10 +53,12 @@ async def add(interaction: discord.Interaction, date: str, time: str, task_name:
         if len(date) == 4:  # MMDD形式
             year = now.year
             due_naive = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M")
-            if due_naive < now:  # 過去日なら翌年
-                due_naive = due_naive.replace(year=year+1)
+            due = due_naive.replace(tzinfo=JST)  # JST付きに
+            if due < now:  # 過去日なら翌年
+                due = due.replace(year=year+1)
         elif len(date) == 8:  # YYYYMMDD形式
             due_naive = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M")
+            due = due_naive.replace(tzinfo=JST)  # JST付き
         else:
             raise ValueError("日付形式が不正です")
         due = due_naive.replace(tzinfo=JST)
