@@ -79,7 +79,27 @@ def reminder_label(days: float) -> str:
         return "当日"
     else:
         return f"{int(days*86400)}秒前"
-    
+
+# -----------------------
+# タスク一覧
+# -----------------------
+
+@tree.command(name="list", description="タスク一覧を表示")
+async def list_tasks(interaction: discord.Interaction):
+    if not tasks_list:
+        await interaction.response.send_message("📭 タスクはありません")
+        return
+
+    msg = "📋 タスク一覧\n"
+    for i, task in enumerate(tasks_list, start=1):
+        msg += (
+            f"{i}. {task['task']}\n"
+            f"📅 {task['due'].strftime('%m/%d %H:%M')}\n"
+            f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}\n\n"
+        )
+
+    await interaction.response.send_message(msg)
+
 # -----------------------
 # タスク編集
 # -----------------------
@@ -300,6 +320,38 @@ async def check_tasks():
     for task in to_remove:
         tasks_list.remove(task)
         print(f"🗑️ タスク削除（期限+1か月経過）: {task['task']}")
+
+# -----------------------
+# タスク削除
+# -----------------------
+@tree.command(name="delete", description="タスク削除")
+@app_commands.describe(index="削除するタスク番号")
+async def delete(interaction: discord.Interaction, index: int):
+    if not (0 < index <= len(tasks_list)):
+        await interaction.response.send_message("❌ 無効な番号です", ephemeral=True)
+        return
+
+    task = tasks_list.pop(index - 1)
+
+    await interaction.response.send_message(
+        f"🗑️ 削除しました\n📌 {task['task']}"
+    )
+
+# -----------------------
+# タスク完了扱い
+# -----------------------
+@tree.command(name="done", description="タスク完了")
+@app_commands.describe(index="完了したタスク番号")
+async def done(interaction: discord.Interaction, index: int):
+    if not (0 < index <= len(tasks_list)):
+        await interaction.response.send_message("❌ 無効な番号です", ephemeral=True)
+        return
+
+    task = tasks_list.pop(index - 1)
+
+    await interaction.response.send_message(
+        f"✅ 完了！\n📌 {task['task']}"
+    )
 
 # -----------------------
 # 起動時
