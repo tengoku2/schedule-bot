@@ -79,6 +79,106 @@ def reminder_label(days: float) -> str:
         return "当日"
     else:
         return f"{int(days*86400)}秒前"
+    
+# -----------------------
+# タスク編集
+# -----------------------
+    
+@tree.command(name="edit", description="タスクを編集します")
+@app_commands.describe(
+    index="編集するタスク番号",
+    date="MMDDまたはYYYYMMDD（省略可）",
+    time="HHMM（省略可）",
+    task_name="新しいタスク名（省略可）",
+    reminders="例:1か月,2週間,1週間（省略可）"
+)
+async def edit(
+    interaction: discord.Interaction,
+    index: int,
+    date: str = None,
+    time: str = None,
+    task_name: str = None,
+    reminders: str = None
+):
+    if not (0 < index <= len(tasks_list)):
+        await interaction.response.send_message("❌ 無効な番号です", ephemeral=True)
+        return
+
+    task = tasks_list[index - 1]
+    now = datetime.datetime.now(JST)
+
+    # -----------------------
+    # タスク名変更
+    # -----------------------
+    if task_name:
+        task["task"] = task_name
+
+    # -----------------------
+    # 日付・時間変更
+    # -----------------------
+    if date or time:
+        try:
+            current_due = task["due"]
+
+            new_date = date if date else current_due.strftime("%Y%m%d")
+            new_time = time if time else current_due.strftime("%H%M")
+
+            if len(new_date) == 4:
+                year = now.year
+                due_naive = datetime.datetime.strptime(f"{year}{new_date} {new_time}", "%Y%m%d %H%M")
+                due = due_naive.replace(tzinfo=JST)
+                if due < now:
+                    due = due.replace(year=year+1)
+            elif len(new_date) == 8:
+                due_naive = datetime.datetime.strptime(f"{new_date} {new_time}", "%Y%m%d %H%M")
+                due = due_naive.replace(tzinfo=JST)
+            else:
+                raise ValueError
+
+            task["due"] = due
+
+            # 🔥 ここ重要：通知リセット
+            task["notified"] = []
+
+        except ValueError:
+            await interaction.response.send_message("❌ 日付形式が不正です", ephemeral=True)
+            return
+
+    # -----------------------
+    # リマインド変更
+    # -----------------------
+    if reminders:
+        new_reminders = parse_reminders(reminders)
+        if not new_reminders:
+            await interaction.response.send_message("❌ remindersが不正です", ephemeral=True)
+            return
+
+        # 過去リマインド除外
+        filtered = []
+        for r in new_reminders:
+            reminder_time = task["due"] - datetime.timedelta(days=r)
+            if reminder_time > now:
+                filtered.append(r)
+
+        # 当日追加
+        if task["due"] > now and 0 not in filtered:
+            filtered.append(0)
+
+        if not filtered:
+            filtered = [0]
+
+        task["reminders"] = sorted(filtered, reverse=True)
+        task["notified"] = []
+
+    # -----------------------
+    # 完了メッセージ
+    # -----------------------
+    await interaction.response.send_message(
+        f"✏️ 編集完了\n"
+        f"📌 {task['task']}\n"
+        f"📅 {task['due'].strftime('%Y-%m-%d %H:%M')}\n"
+        f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}"
+    )
 
 # -----------------------
 # タスク追加
@@ -118,7 +218,6 @@ async def add(
         return
 
     # リマインド設定
-    # リマインド設定
     if reminders:
         reminders_list = parse_reminders(reminders)
         if not reminders_list:
@@ -132,6 +231,7 @@ async def add(
 
     # 👇 ここ追加（超重要）
     now = datetime.datetime.now(JST)
+    # フィルタ
     filtered_reminders = []
 
     for r in reminders_list:
@@ -139,11 +239,15 @@ async def add(
         if reminder_time > now:
             filtered_reminders.append(r)
 
-    # もし全部過去なら「当日だけ残す」
+    # 当日追加
+    if due > now and 0 not in filtered_reminders:
+        filtered_reminders.append(0)
+
+    # 全部過去なら当日のみ
     if not filtered_reminders:
         filtered_reminders = [0]
 
-    # ソート（遠い順）
+    # ソート
     filtered_reminders = sorted(filtered_reminders, reverse=True)
 
 
@@ -157,20 +261,24 @@ async def add(
     }
     tasks_list.append(task)
     await interaction.response.send_message(
-        f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\nリマインド: {', '.join([reminder_label(r) for r in reminders_list])}"
+        f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
+        f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}"
     )
 
 # -----------------------
 # リマインダー処理（順番守る）
 # -----------------------
-@tasks.loop(seconds=5)  # 秒単位テスト用に短く
+@tasks.loop(seconds=30)
 async def check_tasks():
     now = datetime.datetime.now(JST)
     to_remove = []
 
     for task in tasks_list:
         # 直近のリマインド以外は飛ばす
-        remaining = [r for r in task["reminders"] if r not in task["notified"]]
+        remaining = sorted(
+            [r for r in task["reminders"] if r not in task["notified"]],
+            reverse=True
+        )
         if not remaining:
             # 期限＋1か月経過でタスク削除
             if now >= task["due"] + datetime.timedelta(days=30):
@@ -180,7 +288,7 @@ async def check_tasks():
         next_reminder = remaining[0]
         reminder_time = task["due"] - datetime.timedelta(days=next_reminder)
 
-        if now >= reminder_time:
+        if reminder_time <= now < reminder_time + datetime.timedelta(seconds=10):
             channel = bot.get_channel(task["channel_id"])
             if channel:
                 await channel.send(
