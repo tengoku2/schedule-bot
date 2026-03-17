@@ -4,7 +4,6 @@ import datetime
 import json
 import os
 
-TOKEN = "MTQ4MzQyNzA3MzI5MTg0OTc1OA.GytC9k.rLd8w06ClGgIELofLWXOyRLQN0M9woqAsaYo-I"
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
@@ -91,4 +90,4 @@ async def on_ready():
     print("Bot起動")
     check_tasks.start()
 
-bot.run(TOKEN)
+bot.run(os.getenv("TOKEN"))
