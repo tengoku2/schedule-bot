@@ -116,6 +116,7 @@ async def add(
         return
 
     # リマインド設定
+    # リマインド設定
     if reminders:
         reminders_list = parse_reminders(reminders)
         if not reminders_list:
@@ -127,11 +128,29 @@ async def add(
     else:
         reminders_list = [30, 14, 7, 3, 1, 0.125]  # デフォルト
 
+    # 👇 ここ追加（超重要）
+    now = datetime.datetime.now(JST)
+    filtered_reminders = []
+
+    for r in reminders_list:
+        reminder_time = due - datetime.timedelta(days=r)
+        if reminder_time > now:
+            filtered_reminders.append(r)
+
+    # もし全部過去なら「当日だけ残す」
+    if not filtered_reminders:
+        filtered_reminders = [0]
+
+    # ソート（遠い順）
+    filtered_reminders = sorted(filtered_reminders, reverse=True)
+
+
+
     task = {
         "task": task_name,
         "due": due,
         "channel_id": interaction.channel.id,
-        "reminders": sorted(reminders_list, reverse=True),  # 未来→過去順
+        "reminders": filtered_reminders, 
         "notified": []
     }
     tasks_list.append(task)
