@@ -55,6 +55,21 @@ def parse_reminders(reminder_str: str):
             reminders_list.append(mapping[r])
     return reminders_list
 
+# 連絡文字列→日付変換関数
+def reminder_label(days: float) -> str:
+    if days >= 30:
+        return "1か月前"
+    elif days >= 14:
+        return "2週間前"
+    elif days >= 7:
+        return "1週間前"
+    elif days >= 3:
+        return "3日前"
+    elif days >= 1:
+        return "24時間前"
+    else:
+        return "3時間前"
+
 # -----------------------
 # タスク追加
 # -----------------------
@@ -160,7 +175,7 @@ async def check_tasks():
             if now >= reminder_time:
                 channel = bot.get_channel(task["channel_id"])
                 if channel:
-                    await channel.send(f"⏰ {int(r*24)}時間前のリマインド\n📌 {task['task']}")
+                    await channel.send(f"⏰ {reminder_label(r)}のリマインド\n📌 {task['task']}")
                 task["notified"].append(r)
 
 # -----------------------
