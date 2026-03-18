@@ -92,10 +92,19 @@ GUILD_OBJ = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
 # 権限チェック
 # -----------------------
 def can_view(task, user):
+    # 管理者は全部見れる
     if user.guild_permissions.administrator:
         return True
+
+    # 👇 これ追加（超重要）
+    if not task["visible_to"]:
+        return True
+
+    # 個別指定
     if user.id in task["visible_to"]:
         return True
+
+    # ロール指定
     user_role_ids = [r.id for r in user.roles]
     return any(rid in user_role_ids for rid in task.get("roles", []))
 
@@ -255,6 +264,7 @@ async def list_tasks(interaction: discord.Interaction):
     visible="見れるユーザーIDカンマ区切り",
     roles="通知ロールIDカンマ区切り"
 )
+
 async def add(
     interaction: discord.Interaction,
     task_name: str,
@@ -267,8 +277,10 @@ async def add(
     roles: str = None
 ):
     now = datetime.datetime.now(JST)
+    
     if date and len(date)==3: date=date.zfill(4)
     if time and len(time)==3: time=time.zfill(4)
+    
     try:
         if not date and not time:
             due=now.replace(hour=23,minute=59,second=0,microsecond=0)
@@ -292,15 +304,23 @@ async def add(
     except:
         await interaction.response.send_message("❌ 日付/時間形式が不正", ephemeral=True)
         return
+    
     if reminders:
         reminders_list=parse_reminders(reminders)
     else:
         reminders_list=[30,14,7,3,1,0.125]
     filtered_reminders=[r for r in reminders_list if due-datetime.timedelta(days=r)>now]
+    
     if due>now and 0 not in filtered_reminders: filtered_reminders.append(0)
     if not filtered_reminders: filtered_reminders=[0]
+    
     filtered_reminders=sorted(filtered_reminders,reverse=True)
-    visible_ids=[interaction.user.id]
+    
+    if visible:
+        visible_ids = [int(s.strip()) for s in visible.split(",")]
+    else:
+        visible_ids = []  # ← 全員可
+    
     if visible:
         try:
             ids=[int(s.strip()) for s in visible.split(",")]
@@ -352,6 +372,7 @@ async def add(
     channel="通知チャンネル",
     mention="メンションON/OFF"
 )
+
 async def edit(
     interaction: discord.Interaction,
     index: int,
@@ -361,8 +382,10 @@ async def edit(
     channel: discord.TextChannel = None,
     mention: bool = None
 ):
+    
     now=datetime.datetime.now(JST)
     user=interaction.user
+    
     visible_tasks=[t for t in tasks_list if can_view(t,user) and t.get("status")!="done"]
     if not (0<index<=len(visible_tasks)):
         await interaction.response.send_message("❌ 無効な番号",ephemeral=True)
@@ -375,8 +398,10 @@ async def edit(
     current_due=task["due"]
     new_date_val=date or current_due.strftime("%Y%m%d")
     new_time_val=time or current_due.strftime("%H%M")
+    
     if date and len(date)==3: new_date_val=date.zfill(4)
     if time and len(time)==3: new_time_val=time.zfill(4)
+    
     try:
         if len(new_date_val)==4:
             year=now.year
@@ -389,8 +414,10 @@ async def edit(
     except:
         await interaction.response.send_message("❌ 日付/時間形式が不正",ephemeral=True)
         return
+    
     task["due"]=due
     task["notified"]=[]
+    
     if mention is not None:
         task["mention"]=mention
     if channel:
