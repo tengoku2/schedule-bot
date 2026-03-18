@@ -797,6 +797,4 @@ def start_bot():
     import asyncio
     asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-@app.before_first_request
-def start_background():
-    threading.Thread(target=start_bot, daemon=True).start()
+threading.Thread(target=start_bot, daemon=True).start()
