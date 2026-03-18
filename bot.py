@@ -18,12 +18,9 @@ def get_db():
     ssl_disabled=False
     )
 
-try:
+def get_cursor():
     db = get_db()
-    cursor = db.cursor(dictionary=True)
-except Exception as e:
-    print("DB接続失敗:", e)
-    db, cursor = None, None
+    return db, db.cursor(dictionary=True)
 
 DATA_FILE = "tasks.json"
 
@@ -38,8 +35,7 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 def load_tasks():
     global tasks_list
 
-    if cursor is None:
-            return
+    db, cursor = get_cursor()
 
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
@@ -63,6 +59,8 @@ def load_tasks():
             "completed_at": t["completed_at"],
             "everyone": t["everyone"],
         })
+
+    db.close()
 
 # -----------------------
 # Flaskヘルスチェック & Discord Bot設定
@@ -746,10 +744,7 @@ SECRET = os.environ.get("SECRET", "mypassword")
 # 起動（←一番最後に置く）
 # -----------------------
 def start_bot():
-    token = os.environ.get("TOKEN")
-    print("TOKEN:", token)
-    bot.run(token)
+    import asyncio
+    asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-@app.before_first_request
-def start_background():
-    threading.Thread(target=start_bot, daemon=True).start()
+threading.Thread(target=start_bot, daemon=True).start()
