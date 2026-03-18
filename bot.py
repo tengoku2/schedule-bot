@@ -8,14 +8,19 @@ import datetime
 import json
 import mysql.connector
 
-db = mysql.connector.connect(
+def get_db():
+    return mysql.connector.connect(
     host=os.environ.get("DB_HOST"),
+    port=int(os.environ.get("DB_PORT", 15042)),
     user=os.environ.get("DB_USER"),
     password=os.environ.get("DB_PASS"),
-    database=os.environ.get("DB_NAME")
-)
+    database=os.environ.get("DB_NAME"),
+    ssl_disabled=False
+    )
 
-cursor = db.cursor(dictionary=True)
+def get_cursor():
+    db = get_db()
+    return db, db.cursor(dictionary=True)
 
 DATA_FILE = "tasks.json"
 
@@ -72,7 +77,16 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 tasks_list = []
-load_tasks()
+
+# db, cursor定義
+db, cursor = get_cursor()
+
+# Aiven接続安全化
+try:
+    load_tasks()
+except Exception as e:
+    print("DB接続失敗:", e)
+    tasks_list = []
 
 threading.Thread(target=run_web, daemon=True).start()
 
@@ -171,6 +185,9 @@ def dashboard():
 # -----------------------
 # Webから追加用
 # -----------------------
+from flask import session
+app.secret_key = os.environ.get("FLASK_SECRET", "devkey")
+
 @app.route("/add_web", methods=["POST"])
 def add_web():
     task_name = request.form.get("task")
@@ -183,12 +200,12 @@ def add_web():
             due = datetime.datetime.fromisoformat(date_str).replace(tzinfo=JST)
         except:
             return "日付エラー"
-
+    
     task = {
         "task": task_name,
         "due": due,
         "channel_id": None,
-        "owner_id": 0,
+        "owner_id": session.get("user_id", 0), # Discord OAuth入れたら変える
         "visible_to": [],
         "reminders": [0],
         "notified": [],
@@ -207,7 +224,7 @@ def add_web():
         task_name,
         due,
         None,
-        0,
+        session.get("user_id"),
         json.dumps([]),
         json.dumps([]),
         json.dumps([0]),
@@ -573,7 +590,7 @@ async def history(interaction: discord.Interaction):
         return
     msg="📜 完了履歴\n"
     for i,task in enumerate(done_tasks,start=1):
-        completed_time=datetime.datetime.fromisoformat(task["completed_at"]) if task.get("completed_at") else None
+        completed_time = task["completed_at"] if task.get("completed_at") else None
         msg+=f"{i}. {task['task']}\n👤 完了者: <@{task.get('completed_by')}>\n📅 {completed_time.strftime('%m/%d %H:%M') if completed_time else '不明'}\n"
     await interaction.response.send_message(msg)
 
