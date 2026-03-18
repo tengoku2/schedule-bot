@@ -180,7 +180,7 @@ def dashboard():
     return render_template_string(HTML, tasks=list(enumerate(tasks_list)))
 
 # -----------------------
-# Webから追加用
+# Webから追加 /add_web
 # -----------------------
 from flask import session
 app.secret_key = os.environ.get("FLASK_SECRET", "devkey")
@@ -213,55 +213,68 @@ def add_web():
         "completed_at": None
     }
 
-    if cursor is None:
-        return "DB未接続", 500
+    # DB保存
+    try:
+        db, cursor = get_cursor()
 
-    cursor.execute("""
-    INSERT INTO tasks 
-    (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (
-        task_name,
-        due,
-        None,
-        session.get("user_id"),
-        json.dumps([]),
-        json.dumps([]),
-        json.dumps([0]),
-        json.dumps([]),
-        False,
-        False,
-        "todo"
-    ))
-    db.commit()
+        cursor.execute("""
+        INSERT INTO tasks 
+        (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            task_name,
+            due,
+            None,
+            session.get("user_id"),
+            json.dumps([]),
+            json.dumps([]),
+            json.dumps([0]),
+            json.dumps([]),
+            False,
+            False,
+            "todo"
+        ))
 
-    load_tasks()
-    return redirect(f"/dashboard?key={SECRET}")
+        db.commit()
+        db.close()
+        load_tasks()
 
-# Webから完了
+        return redirect(f"/dashboard?key={SECRET}")
+    
+    except Exception as e:
+        print(e)
+        return "❌ DBエラー", 500
+
+# Webから完了 /done_web
 @app.route("/done_web/<int:index>")
 def done_web(index):
     if 0 <= index < len(tasks_list):
         task = tasks_list[index]
 
-        if cursor is None:
-            return "DB未接続", 500
+        # DB保存
+        try:
+            db, cursor = get_cursor()
 
-        cursor.execute("""
-        UPDATE tasks 
-        SET status=%s, completed_at=%s
-        WHERE id=%s AND owner_id=%s
-        """, (
-            "done",
-            datetime.datetime.now(JST),
-            task["id"],
-            task["owner_id"]
-        ))
+            cursor.execute("""
+            UPDATE tasks 
+            SET status=%s, completed_at=%s
+            WHERE id=%s AND owner_id=%s
+            """, (
+                "done",
+                datetime.datetime.now(JST),
+                task["id"],
+                task["owner_id"]
+            ))
 
-        db.commit()
-        load_tasks()
+            db.commit()
+            db.close()
+            load_tasks()
 
-    return redirect(f"/dashboard?key={SECRET}")
+            return redirect(f"/dashboard?key={SECRET}")
+
+        except Exception as e:
+            print(e)
+            return "❌ DBエラー", 500
 
 # Webから削除
 @app.route("/delete_web/<int:index>")
@@ -269,21 +282,27 @@ def delete_web(index):
     if 0 <= index < len(tasks_list):
         task = tasks_list[index]
 
-        if cursor is None:
-            return "DB未接続", 500
+        #DB保存
+        try:
+            db, cursor = get_cursor()
 
-        cursor.execute("""
-        DELETE FROM tasks 
-        WHERE id=%s AND owner_id=%s
-        """, (
-            task["id"],
-            task["owner_id"]
-        ))
+            cursor.execute("""
+            DELETE FROM tasks 
+            WHERE id=%s AND owner_id=%s
+            """, (
+                task["id"],
+                task["owner_id"]
+            ))
 
-        db.commit()
-        load_tasks()
+            db.commit()
+            db.close()
+            load_tasks()
 
-    return redirect(f"/dashboard?key={SECRET}")
+            return redirect(f"/dashboard?key={SECRET}")
+        
+        except Exception as e:
+            print(e)
+            return "❌ DBエラー", 500
 
 
 # -----------------------
@@ -406,29 +425,37 @@ async def add(
     
     tasks_list.append(task)
 
-    if cursor is None:
-            return "DB未接続", 500
+    
 
-    # ✅ ここにDB保存を書く！！！！
-    cursor.execute("""
-        INSERT INTO tasks 
-        (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (
-        task_name,
-        due,
-        channel_id,
-        interaction.user.id,
-        json.dumps(visible_ids),
-        json.dumps(role_ids),
-        json.dumps(filtered_reminders),
-        json.dumps([]),
-        mention,
-        everyone,
-        "todo"
-    ))
+   # DB保存
+    try:
+        db, cursor = get_cursor()
 
-    db.commit()
+        cursor.execute("""
+            INSERT INTO tasks 
+            (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            task_name,
+            due,
+            channel_id,
+            interaction.user.id,
+            json.dumps(visible_ids),
+            json.dumps(role_ids),
+            json.dumps(filtered_reminders),
+            json.dumps([]),
+            mention,
+            everyone,
+            "todo"
+        ))
+
+        db.commit()
+        db.close()
+
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        return
 
     # DBから再読み込み（超重要）
     load_tasks()
@@ -504,24 +531,32 @@ async def edit(
     if channel:
         task["channel_id"]=channel.id
 
-    if cursor is None:
-            return "DB未接続", 500
+    
 
-    # SQL保存
-    cursor.execute("""
-    UPDATE tasks 
-    SET task=%s, due=%s, channel_id=%s, mention=%s
-    WHERE id=%s AND owner_id=%s
-    """, (
-        task["task"],
-        task["due"],
-        task["channel_id"],
-        task["mention"],
-        task["id"],
-        task["owner_id"]
-    ))
-    db.commit()
-    load_tasks()
+    # DB保存
+    try:
+        db, cursor = get_cursor()
+        
+        cursor.execute("""
+        UPDATE tasks 
+        SET task=%s, due=%s, channel_id=%s, mention=%s
+        WHERE id=%s AND owner_id=%s
+        """, (
+            task["task"],
+            task["due"],
+            task["channel_id"],
+            task["mention"],
+            task["id"],
+            task["owner_id"]
+        ))
+
+        db.commit()
+        db.close()
+
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        return
 
     await interaction.response.send_message(
         f"✅ タスク更新: {task['task']}（期限: {task['due'].strftime('%Y-%m-%d %H:%M')}）"
@@ -543,16 +578,24 @@ async def delete(interaction: discord.Interaction, index: int):
         await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
         return
 
-    if cursor is None:
-            return "DB未接続", 500
 
-    # SQL保存
-    cursor.execute("""
-    DELETE FROM tasks 
-    WHERE id=%s
-    """, (task["id"],))
-    db.commit()
-    load_tasks()
+    # DB保存
+    try:
+        db, cursor = get_cursor()
+
+        cursor.execute("""
+        DELETE FROM tasks 
+        WHERE id=%s
+        """, (task["id"],))
+
+        db.commit()
+        db.close()
+        load_tasks()
+
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        return
 
     await interaction.response.send_message(f"🗑️ 削除しました\n📌 {task['task']}")
 
@@ -575,23 +618,30 @@ async def done(interaction: discord.Interaction, index: int):
     task["completed_by"] = user.id
     task["completed_at"] = datetime.datetime.now(JST)
 
-    if cursor is None:
-            return "DB未接続", 500
 
-    # SQL保存
-    cursor.execute("""
-    UPDATE tasks 
-    SET status=%s, completed_by=%s, completed_at=%s
-    WHERE id=%s
-    """, (
-        "done",
-        user.id,
-        datetime.datetime.now(JST),
-        task["id"]
-    ))
-    db.commit()
+    # DB保存
+    try:
+        db, cursor = get_cursor()
 
-    load_tasks()
+        cursor.execute("""
+        UPDATE tasks 
+        SET status=%s, completed_by=%s, completed_at=%s
+        WHERE id=%s
+        """, (
+            "done",
+            user.id,
+            datetime.datetime.now(JST),
+            task["id"]
+        ))
+
+        db.commit()
+        db.close()
+        load_tasks()
+
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        return
 
     await interaction.response.send_message(f"✅ 完了！\n📌 {task['task']}")
 
@@ -628,15 +678,22 @@ async def start(interaction: discord.Interaction, index: int):
         return
     task["status"] = "doing"
 
-    if cursor is None:
-            return "DB未接続", 500
+    # DB保存
+    try:
+        db, cursor = get_cursor()
 
-    cursor.execute("""
-    UPDATE tasks SET status=%s WHERE id=%s
-    """, ("doing", task["id"]))
+        cursor.execute("""
+        UPDATE tasks SET status=%s WHERE id=%s
+        """, ("doing", task["id"]))
 
-    db.commit()
-    load_tasks()
+        db.commit()
+        db.close()
+        load_tasks()
+
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        return
     
     await interaction.response.send_message(f"🚀 進行中に変更！\n📌 {task['task']}")
 
@@ -684,34 +741,24 @@ async def check_tasks():
 
                 task["notified"].append(r)
 
-                if cursor is None:
-                    return "DB未接続", 500
+                # DB保存
+                try:
+                    db, cursor = get_cursor()
 
-                cursor.execute("""
-                UPDATE tasks SET notified=%s
-                WHERE id=%s
-                """, (
-                    json.dumps(task["notified"]),
-                    task["id"]
-                ))
+                    cursor.execute("""
+                    UPDATE tasks SET notified=%s
+                    WHERE id=%s
+                    """, (
+                        json.dumps(task["notified"]),
+                        task["id"]
+                    ))
 
-                db.commit()
-                updated = True
+                    db.commit()
+                    db.close()
 
-        # 期限＋1か月で削除
-        if now >= task["due"] + datetime.timedelta(days=30):
-            to_remove.append(task)
+                except Exception as e:
+                    print(e)
 
-    for task in to_remove:
-        if cursor is None:
-            return "DB未接続", 500
-        cursor.execute("""
-        DELETE FROM tasks WHERE id=%s
-        """, (task["id"],))
-        db.commit()
-
-        print(f"🗑️ タスク削除（期限+1か月）: {task['task']}")
-        updated = True
 
 
 # -----------------------
