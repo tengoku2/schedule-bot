@@ -766,6 +766,8 @@ async def check_tasks():
 # -----------------------
 @bot.event
 async def on_ready():
+    load_tasks()
+
     if GUILD_OBJ:
         await tree.sync(guild=GUILD_OBJ)
         print(f"サーバー専用コマンドを {GUILD_ID} に同期しました")
@@ -790,8 +792,11 @@ SECRET = os.environ.get("SECRET", "mypassword")
 # -----------------------
 # 起動（←一番最後に置く）
 # -----------------------
+
 def start_bot():
     import asyncio
     asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-threading.Thread(target=start_bot, daemon=True).start()
+@app.before_first_request
+def start_background():
+    threading.Thread(target=start_bot, daemon=True).start()
