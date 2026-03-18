@@ -746,6 +746,8 @@ SECRET = os.environ.get("SECRET", "mypassword")
 # 起動（←一番最後に置く）
 # -----------------------
 def start_bot():
-    bot.run(os.environ.get("TOKEN"))
+    token = os.environ.get("TOKEN")
+    print("TOKEN:", token)
+    bot.run(token)
 
 threading.Thread(target=start_bot, daemon=True).start()
