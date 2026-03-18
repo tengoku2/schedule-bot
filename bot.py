@@ -24,6 +24,10 @@ def save_tasks():
             "reminders": t["reminders"],
             "notified": t["notified"],
             "mention": t["mention"],
+            "roles": t.get("roles", []),
+            "status": t.get("status", "todo"),
+            "completed_by": t.get("completed_by"),
+            "completed_at": t.get("completed_at"),
         })
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
@@ -46,7 +50,11 @@ def load_tasks():
                 "visible_to": t["visible_to"],
                 "reminders": t["reminders"],
                 "notified": t["notified"],
-                "mention": t.get("mention", False)
+                "mention": t.get("mention", False),
+                "roles": t.get("roles", []),
+                "status": t.get("status", "todo"),
+                "completed_by": t.get("completed_by"),
+                "completed_at": t.get("completed_at"),
             })
     except FileNotFoundError:
         tasks_list = []
@@ -87,7 +95,12 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 def can_view(task, user):
     if user.guild_permissions.administrator:
         return True
-    return user.id in task["visible_to"]
+
+    if user.id in task["visible_to"]:
+        return True
+
+    user_role_ids = [r.id for r in user.roles]
+    return any(rid in user_role_ids for rid in task.get("roles", []))
 
 def can_edit(task, user):
     if user.guild_permissions.administrator:
@@ -125,7 +138,10 @@ def reminder_label(days: float) -> str:
 @tree.command(name="list", description="タスク一覧を表示", guild=GUILD_OBJ)
 async def list_tasks(interaction: discord.Interaction):
     user = interaction.user
-    visible_tasks = [t for t in tasks_list if can_view(t, user)]
+    visible_tasks = [
+        t for t in tasks_list 
+        if can_view(t, user) and t.get("status") != "done"
+    ]
 
     if not visible_tasks:
         await interaction.response.send_message("📭 タスクはありません")
@@ -133,8 +149,14 @@ async def list_tasks(interaction: discord.Interaction):
 
     msg = "📋 タスク一覧\n"
     for i, task in enumerate(visible_tasks, start=1):
+        status_emoji = {
+            "todo": "📝",
+            "doing": "🚀",
+            "done": "✅"
+        }
+
         msg += (
-            f"{i}. {task['task']}（作成者: <@{task['owner_id']}>）\n"
+            f"{i}. {status_emoji.get(task['status'],'📝')} {task['task']}（作成者: <@{task['owner_id']}>）\n"
             f"📅 {task['due'].strftime('%m/%d %H:%M')}\n"
             f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}\n"
             f"👀 見れる人: {', '.join([f'<@{uid}>' for uid in task['visible_to']])}\n\n"
@@ -163,7 +185,10 @@ async def edit(
     mention: bool = None
 ):
     user = interaction.user
-    visible_tasks = [t for t in tasks_list if can_view(t, user)]
+    visible_tasks = [
+        t for t in tasks_list 
+        if can_view(t, user) and t.get("status") != "done"
+    ]
 
     if not (0 < index <= len(visible_tasks)):
         await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
@@ -237,7 +262,8 @@ async def edit(
     reminders="リマインド例:1か月,2週間",
     visible="閲覧可能ユーザーIDカンマ区切り",
     channel="通知チャンネル",
-    mention="メンションするか（true/false）"
+    mention="メンションするか（true/false）",
+    roles="通知・閲覧対象ロールIDカンマ区切り"
 )
 async def add(
     interaction: discord.Interaction,
@@ -247,7 +273,8 @@ async def add(
     reminders: str = "",
     visible: str = "",
     channel: discord.TextChannel = None,
-    mention: bool = False
+    mention: bool = False,
+    roles: str = "",
 ):
     now = datetime.datetime.now(JST)
     try:
@@ -290,6 +317,17 @@ async def add(
         except:
             await interaction.response.send_message("❌ visibleに不正なIDがあります", ephemeral=True)
             return
+    
+    # ロール
+    role_ids = []
+    if roles:
+        try:
+            for r in roles.split(","):
+                rid = int(r.strip())
+                role_ids.append(rid)
+        except:
+            await interaction.response.send_message("❌ rolesに不正なIDがあります", ephemeral=True)
+            return
 
     # -----------------------
     # チャンネル設定
@@ -304,7 +342,11 @@ async def add(
         "visible_to": visible_ids,
         "reminders": filtered_reminders,
         "notified": [],
-        "mention": mention
+        "mention": mention,
+        "roles": role_ids,
+        "status": "todo",
+        "completed_by": None,
+        "completed_at": None
     }
     tasks_list.append(task)
     save_tasks()
@@ -324,7 +366,10 @@ async def add(
 @app_commands.describe(index="削除するタスク番号")
 async def delete(interaction: discord.Interaction, index: int):
     user = interaction.user
-    visible_tasks = [t for t in tasks_list if can_view(t, user)]
+    visible_tasks = [
+        t for t in tasks_list 
+        if can_view(t, user) and t.get("status") != "done"
+    ]
     if not (0 < index <= len(visible_tasks)):
         await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
         return
@@ -337,6 +382,96 @@ async def delete(interaction: discord.Interaction, index: int):
     await interaction.response.send_message(f"🗑️ 削除しました\n📌 {task['task']}")
 
 # -----------------------
+# タスク完了
+# -----------------------
+@tree.command(name="done", description="タスクを完了にする", guild=GUILD_OBJ)
+@app_commands.describe(index="完了するタスク番号")
+async def done(interaction: discord.Interaction, index: int):
+    user = interaction.user
+    visible_tasks = [
+        t for t in tasks_list 
+        if can_view(t, user) and t.get("status") != "done"
+    ]
+
+    if not (0 < index <= len(visible_tasks)):
+        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        return
+
+    task = visible_tasks[index - 1]
+
+    if not can_edit(task, user):
+        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        return
+
+    task["status"] = "done"
+    task["completed_by"] = user.id
+    task["completed_at"] = datetime.datetime.now(JST).isoformat()
+    
+    save_tasks()
+
+    await interaction.response.send_message(
+        f"✅ 完了！\n📌 {task['task']}"
+    )
+
+# -----------------------
+# 履歴コマンド
+# -----------------------
+@tree.command(name="history", description="完了済みタスク一覧", guild=GUILD_OBJ)
+async def history(interaction: discord.Interaction):
+    user = interaction.user
+
+    done_tasks = [
+        t for t in tasks_list 
+        if can_view(t, user) and t.get("status") == "done"
+    ]
+
+    if not done_tasks:
+        await interaction.response.send_message("📭 完了済みタスクなし")
+        return
+
+    msg = "📜 完了履歴\n"
+    for i, task in enumerate(done_tasks, start=1):
+        completed_time = (
+            datetime.datetime.fromisoformat(task["completed_at"])
+            if task.get("completed_at")
+            else None
+        )
+        
+        msg += (
+            f"{i}. {task['task']}\n"
+            f"👤 完了者: <@{task.get('completed_by')}>\n"
+            f"📅 {completed_time.strftime('%m/%d %H:%M') if completed_time else '不明'}\n"
+        )
+
+    await interaction.response.send_message(msg)
+
+# -----------------------
+# 進捗管理
+# -----------------------
+@tree.command(name="start", description="タスクを開始", guild=GUILD_OBJ)
+@app_commands.describe(index="開始するタスク番号")
+async def start(interaction: discord.Interaction, index: int):
+    user = interaction.user
+    visible_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") != "done"]
+
+    if not (0 < index <= len(visible_tasks)):
+        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        return
+
+    task = visible_tasks[index - 1]
+
+    if not can_edit(task, user):
+        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        return
+
+    task["status"] = "doing"
+    save_tasks()
+
+    await interaction.response.send_message(
+        f"🚀 進行中に変更！\n📌 {task['task']}"
+    )
+
+# -----------------------
 # リマインダー処理
 # -----------------------
 @tasks.loop(seconds=30)
@@ -344,6 +479,8 @@ async def check_tasks():
     now = datetime.datetime.now(JST)
     to_remove = []
     for task in tasks_list:
+        if task.get("status") == "done":
+            continue
         remaining = sorted([r for r in task["reminders"] if r not in task["notified"]], reverse=True)
         if not remaining:
             if now >= task["due"] + datetime.timedelta(days=30):
@@ -362,20 +499,21 @@ async def check_tasks():
             if not channel:
                 print(f"[WARN] channel not found: {task['channel_id']} ({task['task']})")
                 continue
+            
+            mention_text = ""
 
-            if channel:
-                mention_text = ""
+            if task.get("mention", False):
+                user_mentions = [f"<@{uid}>" for uid in task["visible_to"]]
+                role_mentions = [f"<@&{rid}>" for rid in task.get("roles", [])]
+                mention_text = " ".join(user_mentions + role_mentions)
 
-                if task.get("mention", False):
-                    mention_text = " ".join([f"<@{uid}>" for uid in task["visible_to"]])
-
-                await channel.send(
-                    f"{mention_text}\n"
-                    f"⏰ {task['task']}\n"
-                    f"🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
-                )
-                task["notified"].append(next_reminder)
-                save_tasks()
+            await channel.send(
+                f"{mention_text}\n"
+                f"⏰ {task['task']}\n"
+                f"🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
+            )
+            task["notified"].append(next_reminder)
+            save_tasks()
     for task in to_remove:
         tasks_list.remove(task)
         print(f"🗑️ タスク削除（期限+1か月）: {task['task']}")
