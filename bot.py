@@ -18,9 +18,12 @@ def get_db():
     ssl_disabled=False
     )
 
-def get_cursor():
+try:
     db = get_db()
-    return db, db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True)
+except Exception as e:
+    print("DB接続失敗:", e)
+    db, cursor = None, None
 
 DATA_FILE = "tasks.json"
 
@@ -34,6 +37,9 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 # -----------------------
 def load_tasks():
     global tasks_list
+
+    if cursor is None:
+            return "DB未接続", 500
 
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
@@ -78,20 +84,6 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 tasks_list = []
-
-# db, cursor定義
-try:
-    db, cursor = get_cursor()
-except Exception as e:
-    print("DB接続失敗:", e)
-    db, cursor = None, None
-
-# Aiven接続安全化
-try:
-    load_tasks()
-except Exception as e:
-    print("DB接続失敗:", e)
-    tasks_list = []
 
 threading.Thread(target=run_web).start()
 
@@ -221,6 +213,9 @@ def add_web():
         "completed_at": None
     }
 
+    if cursor is None:
+        return "DB未接続", 500
+
     cursor.execute("""
     INSERT INTO tasks 
     (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
@@ -249,6 +244,9 @@ def done_web(index):
     if 0 <= index < len(tasks_list):
         task = tasks_list[index]
 
+        if cursor is None:
+            return "DB未接続", 500
+
         cursor.execute("""
         UPDATE tasks 
         SET status=%s, completed_at=%s
@@ -270,6 +268,9 @@ def done_web(index):
 def delete_web(index):
     if 0 <= index < len(tasks_list):
         task = tasks_list[index]
+
+        if cursor is None:
+            return "DB未接続", 500
 
         cursor.execute("""
         DELETE FROM tasks 
@@ -405,6 +406,8 @@ async def add(
     
     tasks_list.append(task)
 
+    if cursor is None:
+            return "DB未接続", 500
 
     # ✅ ここにDB保存を書く！！！！
     cursor.execute("""
@@ -501,6 +504,9 @@ async def edit(
     if channel:
         task["channel_id"]=channel.id
 
+    if cursor is None:
+            return "DB未接続", 500
+
     # SQL保存
     cursor.execute("""
     UPDATE tasks 
@@ -537,6 +543,9 @@ async def delete(interaction: discord.Interaction, index: int):
         await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
         return
 
+    if cursor is None:
+            return "DB未接続", 500
+
     # SQL保存
     cursor.execute("""
     DELETE FROM tasks 
@@ -565,6 +574,9 @@ async def done(interaction: discord.Interaction, index: int):
     task["status"] = "done"
     task["completed_by"] = user.id
     task["completed_at"] = datetime.datetime.now(JST)
+
+    if cursor is None:
+            return "DB未接続", 500
 
     # SQL保存
     cursor.execute("""
@@ -615,6 +627,9 @@ async def start(interaction: discord.Interaction, index: int):
         await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
         return
     task["status"] = "doing"
+
+    if cursor is None:
+            return "DB未接続", 500
 
     cursor.execute("""
     UPDATE tasks SET status=%s WHERE id=%s
@@ -669,6 +684,9 @@ async def check_tasks():
 
                 task["notified"].append(r)
 
+                if cursor is None:
+                    return "DB未接続", 500
+
                 cursor.execute("""
                 UPDATE tasks SET notified=%s
                 WHERE id=%s
@@ -685,6 +703,8 @@ async def check_tasks():
             to_remove.append(task)
 
     for task in to_remove:
+        if cursor is None:
+            return "DB未接続", 500
         cursor.execute("""
         DELETE FROM tasks WHERE id=%s
         """, (task["id"],))
