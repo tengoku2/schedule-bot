@@ -22,7 +22,8 @@ def save_tasks():
             "owner_id": t["owner_id"],
             "visible_to": t["visible_to"],
             "reminders": t["reminders"],
-            "notified": t["notified"]
+            "notified": t["notified"],
+            "mention": t["mention"],
         })
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
@@ -44,7 +45,8 @@ def load_tasks():
                 "owner_id": t["owner_id"],
                 "visible_to": t["visible_to"],
                 "reminders": t["reminders"],
-                "notified": t["notified"]
+                "notified": t["notified"],
+                "mention": t.get("mention", False)
             })
     except FileNotFoundError:
         tasks_list = []
@@ -148,10 +150,20 @@ async def list_tasks(interaction: discord.Interaction):
     time="HHMM",
     task_name="タスク内容",
     reminders="リマインド例:1か月,2週間",
-    visible="閲覧可能ユーザーIDカンマ区切り"
+    visible="閲覧可能ユーザーIDカンマ区切り",
+    channel="通知チャンネル",
+    mention="メンションするか（true/false）"
 )
-async def add(interaction: discord.Interaction, date: str, time: str, task_name: str,
-              reminders: str = "", visible: str = ""):
+async def add(
+    interaction: discord.Interaction,
+    date: str,
+    time: str,
+    task_name: str,
+    reminders: str = "",
+    visible: str = "",
+    channel: discord.TextChannel = None,
+    mention: bool = False
+):
     now = datetime.datetime.now(JST)
     try:
         if len(date) == 4:
@@ -194,14 +206,20 @@ async def add(interaction: discord.Interaction, date: str, time: str, task_name:
             await interaction.response.send_message("❌ visibleに不正なIDがあります", ephemeral=True)
             return
 
+    # -----------------------
+    # チャンネル設定
+    # -----------------------
+    channel_id = channel.id if channel else interaction.channel.id
+
     task = {
         "task": task_name,
         "due": due,
-        "channel_id": interaction.channel.id,
+        "channel_id": channel_id,
         "owner_id": interaction.user.id,
         "visible_to": visible_ids,
         "reminders": filtered_reminders,
-        "notified": []
+        "notified": [],
+        "mention": mention
     }
     tasks_list.append(task)
     save_tasks()
@@ -209,7 +227,9 @@ async def add(interaction: discord.Interaction, date: str, time: str, task_name:
     await interaction.response.send_message(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
         f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}\n"
-        f"見れる人: {', '.join([f'<@{uid}>' for uid in visible_ids])}"
+        f"見れる人: {', '.join([f'<@{uid}>' for uid in visible_ids])}\n"
+        f"📢 チャンネル: <#{channel_id}>\n"
+        f"💬 メンション: {'ON' if mention else 'OFF'}"
     )
 
 # -----------------------
@@ -246,12 +266,21 @@ async def check_tasks():
             continue
         next_reminder = remaining[0]
         reminder_time = task["due"] - datetime.timedelta(days=next_reminder)
-        if reminder_time <= now < reminder_time + datetime.timedelta(seconds=10):
+        if reminder_time <= now < reminder_time + datetime.timedelta(seconds=30):
             channel = bot.get_channel(task["channel_id"])
             if channel:
-                await channel.send(f"⏰ {task['task']}\n🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}")
-            task["notified"].append(next_reminder)
-            save_tasks()
+                mention_text = ""
+
+                if task.get("mention", False):
+                    mention_text = " ".join([f"<@{uid}>" for uid in task["visible_to"]])
+
+                await channel.send(
+                    f"{mention_text}\n"
+                    f"⏰ {task['task']}\n"
+                    f"🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
+                )
+                task["notified"].append(next_reminder)
+                save_tasks()
     for task in to_remove:
         tasks_list.remove(task)
         print(f"🗑️ タスク削除（期限+1か月）: {task['task']}")
