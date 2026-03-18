@@ -69,12 +69,6 @@ def load_tasks():
 # -----------------------
 app = Flask(__name__)
 
-
-def start_bot():
-    bot.run(os.environ.get("TOKEN"))
-
-threading.Thread(target=start_bot, daemon=True).start()
-
 @app.route("/")
 def home():
     return "OK", 200
@@ -94,8 +88,11 @@ tasks_list = []
 
 # サーバー専用 or グローバル
 GUILD_ID = os.environ.get("GUILD_ID")
-GUILD_OBJ = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
 
+try:
+    GUILD_OBJ = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
+except:
+    GUILD_OBJ = None
 # -----------------------
 # 権限チェック
 # -----------------------
