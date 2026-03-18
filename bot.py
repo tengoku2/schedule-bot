@@ -741,8 +741,7 @@ def check_auth():
 # -----------------------
 # 起動（←一番最後に置く）
 # -----------------------
-if __name__ == "__main__":
-    threading.Thread(
-        target=lambda: bot.run(os.environ.get("TOKEN")),
-        daemon=True
-    ).start()
+def start_bot():
+    bot.run(os.environ.get("TOKEN"))
+
+threading.Thread(target=start_bot, daemon=True).start()
