@@ -33,6 +33,7 @@ def save_tasks():
             "status": t.get("status", "todo"),
             "completed_by": t.get("completed_by"),
             "completed_at": t.get("completed_at"),
+            "everyone": t.get("everyone", False),
         })
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
@@ -54,6 +55,7 @@ def load_tasks():
                 "notified": t["notified"],
                 "mention": t.get("mention", False),
                 "roles": t.get("roles", []),
+                "everyone": t.get("everyone", False),
                 "status": t.get("status", "todo"),
                 "completed_by": t.get("completed_by"),
                 "completed_at": t.get("completed_at"),
@@ -195,7 +197,7 @@ def add_web():
     task = {
         "task": task_name,
         "due": due,
-        "channel_id": 0,
+        "channel_id": None,
         "owner_id": 0,
         "visible_to": [],
         "reminders": [0],
@@ -242,11 +244,23 @@ async def list_tasks(interaction: discord.Interaction):
     msg = "📋 タスク一覧\n"
     for i, task in enumerate(visible_tasks, start=1):
         status_emoji = {"todo":"📝","doing":"🚀","done":"✅"}
+
+        # viewers生成
+        if task.get("everyone"):
+            viewers = "@everyone"
+        elif not task["visible_to"] and not task.get("roles"):
+            viewers = "全員"
+        else:
+            viewers = " ".join(
+                [f"<@{uid}>" for uid in task["visible_to"]] +
+                [f"<@&{rid}>" for rid in task.get("roles", [])]
+            )
+
         msg += (
             f"{i}. {status_emoji.get(task['status'],'📝')} {task['task']}（作成者: <@{task['owner_id']}>）\n"
             f"📅 {task['due'].strftime('%m/%d %H:%M')}\n"
             f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}\n"
-            f"👀 見れる人: {', '.join([f'<@{uid}>' for uid in task['visible_to']])}\n\n"
+            f"👀 見れる人: {viewers}\n\n"
         )
     await interaction.response.send_message(msg)
 
@@ -262,7 +276,8 @@ async def list_tasks(interaction: discord.Interaction):
     mention="メンションON/OFF",
     reminders="リマインド設定（例: 1か月,3日前,24時間）",
     visible="見れるユーザーIDカンマ区切り",
-    roles="通知ロールIDカンマ区切り"
+    roles="通知ロールIDカンマ区切り",
+    everyone="全体メンションするか"
 )
 
 async def add(
@@ -274,7 +289,8 @@ async def add(
     mention: bool = False,
     reminders: str = None,
     visible: str = None,
-    roles: str = None
+    roles: str = None,
+    everyone: bool = False,
 ):
     now = datetime.datetime.now(JST)
     
@@ -316,25 +332,22 @@ async def add(
     
     filtered_reminders=sorted(filtered_reminders,reverse=True)
     
-    if visible:
-        visible_ids = [int(s.strip()) for s in visible.split(",")]
-    else:
-        visible_ids = []  # ← 全員可
-    
+    visible_ids = []
     if visible:
         try:
-            ids=[int(s.strip()) for s in visible.split(",")]
-            visible_ids+=[uid for uid in ids if uid not in visible_ids]
+            visible_ids = list(set(int(s.strip()) for s in visible.split(",")))
         except:
             await interaction.response.send_message("❌ visibleに不正なIDがあります", ephemeral=True)
             return
-    role_ids=[]
+    
+    role_ids = []
     if roles:
         try:
-            role_ids=[int(r.strip()) for r in roles.split(",")]
+            role_ids = [int(r.strip()) for r in roles.split(",")]
         except:
             await interaction.response.send_message("❌ rolesに不正なIDがあります", ephemeral=True)
             return
+        
     channel_id=channel.id if channel else interaction.channel.id
     task={
         "task":task_name,
@@ -348,7 +361,8 @@ async def add(
         "roles":role_ids,
         "status":"todo",
         "completed_by":None,
-        "completed_at":None
+        "completed_at":None,
+        "everyone": everyone,
     }
     tasks_list.append(task)
     save_tasks()
@@ -380,7 +394,7 @@ async def edit(
     date: str = None,
     time: str = None,
     channel: discord.TextChannel = None,
-    mention: bool = None
+    mention: bool = None,
 ):
     
     now=datetime.datetime.now(JST)
@@ -503,7 +517,7 @@ async def start(interaction: discord.Interaction, index: int):
     await interaction.response.send_message(f"🚀 進行中に変更！\n📌 {task['task']}")
 
 # -----------------------
-# リマインダー処理
+# リマインダー処理 check_tasks
 # -----------------------
 @tasks.loop(seconds=30)
 async def check_tasks():
@@ -521,18 +535,24 @@ async def check_tasks():
 
             reminder_time = task["due"] - datetime.timedelta(days=r)
 
-            # 👇 ここが最重要修正
             if reminder_time <= now < reminder_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(task["channel_id"])
                 if not channel:
-                    print(f"[WARN] channel not found: {task['channel_id']} ({task['task']})")
                     continue
 
                 mention_text = ""
+
                 if task.get("mention", False):
-                    user_mentions = [f"<@{uid}>" for uid in task["visible_to"]]
-                    role_mentions = [f"<@&{rid}>" for rid in task.get("roles", [])]
-                    mention_text = " ".join(user_mentions + role_mentions)
+                    mentions = []
+
+                    # 👇 everyone優先
+                    if task.get("everyone", False):
+                        mentions.append("@everyone")
+                    else:
+                        mentions += [f"<@{uid}>" for uid in task["visible_to"]]
+                        mentions += [f"<@&{rid}>" for rid in task.get("roles", [])]
+
+                    mention_text = " ".join(mentions)
 
                 await channel.send(
                     f"{mention_text}\n⏰ {task['task']}\n🕒 {reminder_label(r)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
@@ -568,7 +588,7 @@ async def on_ready():
     check_tasks.start()
 
 # セキュリティチェック
-SECRET = "mypassword"
+SECRET = os.environ.get("SECRET", "mypassword")
 
 @app.before_request
 def check_auth():
