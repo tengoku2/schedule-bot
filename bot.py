@@ -142,6 +142,91 @@ async def list_tasks(interaction: discord.Interaction):
     await interaction.response.send_message(msg)
 
 # -----------------------
+# タスク編集
+# -----------------------
+@tree.command(name="edit", description="タスク編集", guild=GUILD_OBJ)
+@app_commands.describe(
+    index="編集するタスク番号",
+    task_name="新しいタスク名",
+    date="MMDDまたはYYYYMMDD",
+    time="HHMM",
+    channel="通知チャンネル",
+    mention="メンションON/OFF"
+)
+async def edit(
+    interaction: discord.Interaction,
+    index: int,
+    task_name: str = None,
+    date: str = None,
+    time: str = None,
+    channel: discord.TextChannel = None,
+    mention: bool = None
+):
+    user = interaction.user
+    visible_tasks = [t for t in tasks_list if can_view(t, user)]
+
+    if not (0 < index <= len(visible_tasks)):
+        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        return
+
+    task = visible_tasks[index - 1]
+
+    if not can_edit(task, user):
+        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        return
+
+    now = datetime.datetime.now(JST)
+
+    # -----------------------
+    # タスク名変更
+    # -----------------------
+    if task_name:
+        task["task"] = task_name
+
+    # -----------------------
+    # 日付変更
+    # -----------------------
+    if date and time:
+        try:
+            if len(date) == 4:
+                year = now.year
+                new_due = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+                if new_due < now:
+                    new_due = new_due.replace(year=year+1)
+            elif len(date) == 8:
+                new_due = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+            else:
+                raise ValueError
+
+            task["due"] = new_due
+            task["notified"] = []  # リセット
+        except:
+            await interaction.response.send_message("❌ 日付形式が不正", ephemeral=True)
+            return
+
+    # -----------------------
+    # チャンネル変更
+    # -----------------------
+    if channel:
+        task["channel_id"] = channel.id
+
+    # -----------------------
+    # メンション変更
+    # -----------------------
+    if mention is not None:
+        task["mention"] = mention
+
+    save_tasks()
+
+    await interaction.response.send_message(
+        f"✏️ 編集完了\n"
+        f"📌 {task['task']}\n"
+        f"📅 {task['due'].strftime('%Y-%m-%d %H:%M')}\n"
+        f"📢 <#{task['channel_id']}>\n"
+        f"💬 {'ON' if task['mention'] else 'OFF'}"
+    )
+
+# -----------------------
 # タスク追加（チーム対応）
 # -----------------------
 @tree.command(name="add", description="タスクを追加します", guild=GUILD_OBJ)
@@ -266,8 +351,18 @@ async def check_tasks():
             continue
         next_reminder = remaining[0]
         reminder_time = task["due"] - datetime.timedelta(days=next_reminder)
-        if reminder_time <= now < reminder_time + datetime.timedelta(seconds=30):
+        if reminder_time <= now and next_reminder not in task["notified"]:
+            # 5分以上遅れてたらスキップ
+            if now - reminder_time > datetime.timedelta(minutes=5):
+                task["notified"].append(next_reminder)
+                continue
+
             channel = bot.get_channel(task["channel_id"])
+
+            if not channel:
+                print(f"[WARN] channel not found: {task['channel_id']} ({task['task']})")
+                continue
+
             if channel:
                 mention_text = ""
 
