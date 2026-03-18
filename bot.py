@@ -738,13 +738,13 @@ async def on_ready():
 # セキュリティチェック
 SECRET = os.environ.get("SECRET", "mypassword")
 
-@app.before_request
-def check_auth():
-    open_paths = ["/", "/add_web", "/done_web", "/delete_web"]
+# @app.before_request
+# def check_auth():
+    # open_paths = ["/", "/add_web", "/done_web", "/delete_web"]
 
-    if request.path not in open_paths:
-        if request.args.get("key") != SECRET:
-            return "Unauthorized", 403
+    # if request.path not in open_paths:
+    #     if request.args.get("key") != SECRET:
+    #         return "Unauthorized", 403
         
 
 # -----------------------
