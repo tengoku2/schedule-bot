@@ -6,6 +6,16 @@ from flask import Flask
 import threading
 import datetime
 import json
+import mysql.connector
+
+db = mysql.connector.connect(
+    host=os.environ.get("DB_HOST"),
+    user=os.environ.get("DB_USER"),
+    password=os.environ.get("DB_PASS"),
+    database=os.environ.get("DB_NAME")
+)
+
+cursor = db.cursor(dictionary=True)
 
 DATA_FILE = "tasks.json"
 
@@ -15,53 +25,33 @@ DATA_FILE = "tasks.json"
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
 # -----------------------
-# JSON保存/読み込み
+# MySQL読み込み/ load_tasks
 # -----------------------
-def save_tasks():
-    data = []
-    for t in tasks_list:
-        data.append({
-            "task": t["task"],
-            "due": t["due"].isoformat(),
-            "channel_id": t["channel_id"],
-            "owner_id": t["owner_id"],
-            "visible_to": t["visible_to"],
-            "reminders": t["reminders"],
-            "notified": t["notified"],
-            "mention": t["mention"],
-            "roles": t.get("roles", []),
-            "status": t.get("status", "todo"),
-            "completed_by": t.get("completed_by"),
-            "completed_at": t.get("completed_at"),
-            "everyone": t.get("everyone", False),
-        })
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
 def load_tasks():
     global tasks_list
-    try:
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-        tasks_list = []
-        for t in data:
-            tasks_list.append({
-                "task": t["task"],
-                "due": datetime.datetime.fromisoformat(t["due"]).astimezone(JST),
-                "channel_id": t["channel_id"],
-                "owner_id": t["owner_id"],
-                "visible_to": t["visible_to"],
-                "reminders": t["reminders"],
-                "notified": t["notified"],
-                "mention": t.get("mention", False),
-                "roles": t.get("roles", []),
-                "everyone": t.get("everyone", False),
-                "status": t.get("status", "todo"),
-                "completed_by": t.get("completed_by"),
-                "completed_at": t.get("completed_at"),
-            })
-    except FileNotFoundError:
-        tasks_list = []
+
+    cursor.execute("SELECT * FROM tasks")
+    rows = cursor.fetchall()
+
+    tasks_list = []
+
+    for t in rows:
+        tasks_list.append({
+            "id": t["id"],
+            "task": t["task"],
+            "due": t["due"].astimezone(JST),
+            "channel_id": t["channel_id"],
+            "owner_id": t["owner_id"],
+            "visible_to": json.loads(t["visible_to"] or "[]"),
+            "reminders": json.loads(t["reminders"] or "[]"),
+            "notified": json.loads(t["notified"] or "[]"),
+            "mention": t["mention"],
+            "roles": json.loads(t["roles"] or "[]"),
+            "status": t["status"],
+            "completed_by": t["completed_by"],
+            "completed_at": t["completed_at"],
+            "everyone": t["everyone"],
+        })
 
 # -----------------------
 # Flaskヘルスチェック & Discord Bot設定
@@ -209,25 +199,67 @@ def add_web():
         "completed_at": None
     }
 
-    tasks_list.append(task)
-    save_tasks()
+    cursor.execute("""
+    INSERT INTO tasks 
+    (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        task_name,
+        due,
+        None,
+        0,
+        json.dumps([]),
+        json.dumps([]),
+        json.dumps([0]),
+        json.dumps([]),
+        False,
+        False,
+        "todo"
+    ))
+    db.commit()
+
+    load_tasks()
     return redirect(f"/dashboard?key={SECRET}")
 
 # Webから完了
 @app.route("/done_web/<int:index>")
 def done_web(index):
     if 0 <= index < len(tasks_list):
-        tasks_list[index]["status"] = "done"
-        tasks_list[index]["completed_at"] = datetime.datetime.now(JST).isoformat()
-        save_tasks()
+        task = tasks_list[index]
+
+        cursor.execute("""
+        UPDATE tasks 
+        SET status=%s, completed_at=%s
+        WHERE id=%s AND owner_id=%s
+        """, (
+            "done",
+            datetime.datetime.now(JST),
+            task["id"],
+            task["owner_id"]
+        ))
+
+        db.commit()
+        load_tasks()
+
     return redirect(f"/dashboard?key={SECRET}")
 
 # Webから削除
 @app.route("/delete_web/<int:index>")
 def delete_web(index):
     if 0 <= index < len(tasks_list):
-        tasks_list.pop(index)
-        save_tasks()
+        task = tasks_list[index]
+
+        cursor.execute("""
+        DELETE FROM tasks 
+        WHERE id=%s AND owner_id=%s
+        """, (
+            task["id"],
+            task["owner_id"]
+        ))
+
+        db.commit()
+        load_tasks()
+
     return redirect(f"/dashboard?key={SECRET}")
 
 
@@ -267,19 +299,8 @@ async def list_tasks(interaction: discord.Interaction):
 # -----------------------
 # /add コマンド
 # -----------------------
-@tree.command(name="add", description="新しいタスクを追加", guild=GUILD_OBJ)
-@app_commands.describe(
-    task_name="タスク名",
-    date="MMDDまたはYYYYMMDD",
-    time="HHMM",
-    channel="通知チャンネル",
-    mention="メンションON/OFF",
-    reminders="リマインド設定（例: 1か月,3日前,24時間）",
-    visible="見れるユーザーIDカンマ区切り",
-    roles="通知ロールIDカンマ区切り",
-    everyone="全体メンションするか"
-)
 
+@tree.command(name="add", description="新しいタスクを追加", guild=GUILD_OBJ)
 async def add(
     interaction: discord.Interaction,
     task_name: str,
@@ -293,6 +314,8 @@ async def add(
     everyone: bool = False,
 ):
     now = datetime.datetime.now(JST)
+
+    # （←今まで書いてた日付処理そのままでOK）
     
     if date and len(date)==3: date=date.zfill(4)
     if time and len(time)==3: time=time.zfill(4)
@@ -332,23 +355,16 @@ async def add(
     
     filtered_reminders=sorted(filtered_reminders,reverse=True)
     
+    channel_id = channel.id if channel else interaction.channel.id
+
     visible_ids = []
     if visible:
-        try:
-            visible_ids = list(set(int(s.strip()) for s in visible.split(",")))
-        except:
-            await interaction.response.send_message("❌ visibleに不正なIDがあります", ephemeral=True)
-            return
-    
+        visible_ids = [int(v.strip()) for v in visible.split(",")]
+
     role_ids = []
     if roles:
-        try:
-            role_ids = [int(r.strip()) for r in roles.split(",")]
-        except:
-            await interaction.response.send_message("❌ rolesに不正なIDがあります", ephemeral=True)
-            return
-        
-    channel_id=channel.id if channel else interaction.channel.id
+        role_ids = [int(r.strip()) for r in roles.split(",")]
+    
     task={
         "task":task_name,
         "due":due,
@@ -364,8 +380,34 @@ async def add(
         "completed_at":None,
         "everyone": everyone,
     }
+    
     tasks_list.append(task)
-    save_tasks()
+
+
+    # ✅ ここにDB保存を書く！！！！
+    cursor.execute("""
+        INSERT INTO tasks 
+        (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        task_name,
+        due,
+        channel_id,
+        interaction.user.id,
+        json.dumps(visible_ids),
+        json.dumps(role_ids),
+        json.dumps(filtered_reminders),
+        json.dumps([]),
+        mention,
+        everyone,
+        "todo"
+    ))
+
+    db.commit()
+
+    # DBから再読み込み（超重要）
+    load_tasks()
+
     await interaction.response.send_message(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
         f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}\n"
@@ -436,7 +478,23 @@ async def edit(
         task["mention"]=mention
     if channel:
         task["channel_id"]=channel.id
-    save_tasks()
+
+    # SQL保存
+    cursor.execute("""
+    UPDATE tasks 
+    SET task=%s, due=%s, channel_id=%s, mention=%s
+    WHERE id=%s AND owner_id=%s
+    """, (
+        task["task"],
+        task["due"],
+        task["channel_id"],
+        task["mention"],
+        task["id"],
+        task["owner_id"]
+    ))
+    db.commit()
+    load_tasks()
+
     await interaction.response.send_message(
         f"✅ タスク更新: {task['task']}（期限: {task['due'].strftime('%Y-%m-%d %H:%M')}）"
     )
@@ -456,8 +514,15 @@ async def delete(interaction: discord.Interaction, index: int):
     if not can_edit(task, user):
         await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
         return
-    tasks_list.remove(task)
-    save_tasks()
+
+    # SQL保存
+    cursor.execute("""
+    DELETE FROM tasks 
+    WHERE id=%s
+    """, (task["id"],))
+    db.commit()
+    load_tasks()
+
     await interaction.response.send_message(f"🗑️ 削除しました\n📌 {task['task']}")
 
 # -----------------------
@@ -477,8 +542,23 @@ async def done(interaction: discord.Interaction, index: int):
         return
     task["status"] = "done"
     task["completed_by"] = user.id
-    task["completed_at"] = datetime.datetime.now(JST).isoformat()
-    save_tasks()
+    task["completed_at"] = datetime.datetime.now(JST)
+
+    # SQL保存
+    cursor.execute("""
+    UPDATE tasks 
+    SET status=%s, completed_by=%s, completed_at=%s
+    WHERE id=%s
+    """, (
+        "done",
+        user.id,
+        datetime.datetime.now(JST),
+        task["id"]
+    ))
+    db.commit()
+
+    load_tasks()
+
     await interaction.response.send_message(f"✅ 完了！\n📌 {task['task']}")
 
 # -----------------------
@@ -513,7 +593,14 @@ async def start(interaction: discord.Interaction, index: int):
         await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
         return
     task["status"] = "doing"
-    save_tasks()
+
+    cursor.execute("""
+    UPDATE tasks SET status=%s WHERE id=%s
+    """, ("doing", task["id"]))
+
+    db.commit()
+    load_tasks()
+    
     await interaction.response.send_message(f"🚀 進行中に変更！\n📌 {task['task']}")
 
 # -----------------------
@@ -559,6 +646,16 @@ async def check_tasks():
                 )
 
                 task["notified"].append(r)
+
+                cursor.execute("""
+                UPDATE tasks SET notified=%s
+                WHERE id=%s
+                """, (
+                    json.dumps(task["notified"]),
+                    task["id"]
+                ))
+
+                db.commit()
                 updated = True
 
         # 期限＋1か月で削除
@@ -566,12 +663,14 @@ async def check_tasks():
             to_remove.append(task)
 
     for task in to_remove:
-        tasks_list.remove(task)
+        cursor.execute("""
+        DELETE FROM tasks WHERE id=%s
+        """, (task["id"],))
+        db.commit()
+
         print(f"🗑️ タスク削除（期限+1か月）: {task['task']}")
         updated = True
 
-    if updated:
-        save_tasks()
 
 # -----------------------
 # 起動時
