@@ -310,16 +310,20 @@ def delete_web(index):
 # -----------------------
 @tree.command(name="list", description="タスク一覧を表示", guild=GUILD_OBJ)
 async def list_tasks(interaction: discord.Interaction):
+
+    await interaction.response.defer()
+
     user = interaction.user
     visible_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") != "done"]
+
     if not visible_tasks:
-        await interaction.response.send_message("📭 タスクはありません")
+        await interaction.followup.send("📭 タスクはありません")
         return
+
     msg = "📋 タスク一覧\n"
     for i, task in enumerate(visible_tasks, start=1):
         status_emoji = {"todo":"📝","doing":"🚀","done":"✅"}
 
-        # viewers生成
         if task.get("everyone"):
             viewers = "@everyone"
         elif not task["visible_to"] and not task.get("roles"):
@@ -336,7 +340,8 @@ async def list_tasks(interaction: discord.Interaction):
             f"🔔 {', '.join([reminder_label(r) for r in task['reminders']])}\n"
             f"👀 見れる人: {viewers}\n\n"
         )
-    await interaction.response.send_message(msg)
+
+    await interaction.followup.send(msg)
 
 # -----------------------
 # /add コマンド
@@ -356,9 +361,9 @@ async def add(
     everyone: bool = False,
 ):
     now = datetime.datetime.now(JST)
+    await interaction.response.defer()  # 追加！！！
 
-    # （←今まで書いてた日付処理そのままでOK）
-    
+    # 日付処理  
     if date and len(date)==3: date=date.zfill(4)
     if time and len(time)==3: time=time.zfill(4)
     
@@ -383,7 +388,7 @@ async def add(
             else:
                 due=datetime.datetime.strptime(f"{date} {time}","%Y%m%d %H%M").replace(tzinfo=JST)
     except:
-        await interaction.response.send_message("❌ 日付/時間形式が不正", ephemeral=True)
+        await interaction.followup.send("❌ 日付/時間形式が不正", ephemeral=True)
         return
     
     if reminders:
@@ -454,13 +459,13 @@ async def add(
 
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
 
     # DBから再読み込み（超重要）
     load_tasks()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
         f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}\n"
         f"見れる人: {', '.join([f'<@{uid}>' for uid in visible_ids])}\n"
@@ -493,14 +498,15 @@ async def edit(
     
     now=datetime.datetime.now(JST)
     user=interaction.user
+    await interaction.response.defer()  # 追加！！！
     
     visible_tasks=[t for t in tasks_list if can_view(t,user) and t.get("status")!="done"]
     if not (0<index<=len(visible_tasks)):
-        await interaction.response.send_message("❌ 無効な番号",ephemeral=True)
+        await interaction.followup.send("❌ 無効な番号",ephemeral=True)
         return
     task=visible_tasks[index-1]
     if not can_edit(task,user):
-        await interaction.response.send_message("❌ 権限がありません",ephemeral=True)
+        await interaction.followup.send("❌ 権限がありません",ephemeral=True)
         return
     if task_name: task["task"]=task_name
     current_due=task["due"]
@@ -520,7 +526,7 @@ async def edit(
         else:
             raise ValueError
     except:
-        await interaction.response.send_message("❌ 日付/時間形式が不正",ephemeral=True)
+        await interaction.followup.send("❌ 日付/時間形式が不正",ephemeral=True)
         return
     
     task["due"]=due
@@ -555,10 +561,10 @@ async def edit(
 
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ タスク更新: {task['task']}（期限: {task['due'].strftime('%Y-%m-%d %H:%M')}）"
     )
 
@@ -568,15 +574,20 @@ async def edit(
 @tree.command(name="delete", description="タスク削除", guild=GUILD_OBJ)
 @app_commands.describe(index="削除するタスク番号")
 async def delete(interaction: discord.Interaction, index: int):
+
+    await interaction.response.defer()  # 追加！！！
     user = interaction.user
     visible_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") != "done"]
+
     if not (0 < index <= len(visible_tasks)):
-        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        await interaction.followup.send("❌ 無効な番号", ephemeral=True)
         return
     task = visible_tasks[index - 1]
     if not can_edit(task, user):
-        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        await interaction.followup.send("❌ 権限がありません", ephemeral=True)
         return
+    
+    
 
 
     # DB保存
@@ -594,10 +605,10 @@ async def delete(interaction: discord.Interaction, index: int):
 
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"🗑️ 削除しました\n📌 {task['task']}")
+    await interaction.followup.send(f"🗑️ 削除しました\n📌 {task['task']}")
 
 # -----------------------
 # /done コマンド
@@ -605,14 +616,17 @@ async def delete(interaction: discord.Interaction, index: int):
 @tree.command(name="done", description="タスクを完了にする", guild=GUILD_OBJ)
 @app_commands.describe(index="完了するタスク番号")
 async def done(interaction: discord.Interaction, index: int):
+
+    await interaction.response.defer()  # 追加！！！
     user = interaction.user
     visible_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") != "done"]
+    
     if not (0 < index <= len(visible_tasks)):
-        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        await interaction.followup.send("❌ 無効な番号", ephemeral=True)
         return
     task = visible_tasks[index - 1]
     if not can_edit(task, user):
-        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        await interaction.followup.send("❌ 権限がありません", ephemeral=True)
         return
     task["status"] = "done"
     task["completed_by"] = user.id
@@ -640,26 +654,29 @@ async def done(interaction: discord.Interaction, index: int):
 
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"✅ 完了！\n📌 {task['task']}")
+    await interaction.followup.send(f"✅ 完了！\n📌 {task['task']}")
 
 # -----------------------
 # /history コマンド
 # -----------------------
 @tree.command(name="history", description="完了済みタスク一覧", guild=GUILD_OBJ)
 async def history(interaction: discord.Interaction):
+
+    await interaction.response.defer()  # 追加！！！
     user = interaction.user
     done_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") == "done"]
+
     if not done_tasks:
-        await interaction.response.send_message("📭 完了済みタスクなし")
+        await interaction.followup.send("📭 完了済みタスクなし")
         return
     msg="📜 完了履歴\n"
     for i,task in enumerate(done_tasks,start=1):
         completed_time = task["completed_at"] if task.get("completed_at") else None
         msg+=f"{i}. {task['task']}\n👤 完了者: <@{task.get('completed_by')}>\n📅 {completed_time.strftime('%m/%d %H:%M') if completed_time else '不明'}\n"
-    await interaction.response.send_message(msg)
+    await interaction.followup.send(msg)
 
 # -----------------------
 # /start コマンド
@@ -667,14 +684,17 @@ async def history(interaction: discord.Interaction):
 @tree.command(name="start", description="タスクを開始", guild=GUILD_OBJ)
 @app_commands.describe(index="開始するタスク番号")
 async def start(interaction: discord.Interaction, index: int):
+
+    await interaction.response.defer()  # 追加！！！
     user = interaction.user
     visible_tasks = [t for t in tasks_list if can_view(t, user) and t.get("status") != "done"]
+
     if not (0 < index <= len(visible_tasks)):
-        await interaction.response.send_message("❌ 無効な番号", ephemeral=True)
+        await interaction.followup.send("❌ 無効な番号", ephemeral=True)
         return
     task = visible_tasks[index - 1]
     if not can_edit(task, user):
-        await interaction.response.send_message("❌ 権限がありません", ephemeral=True)
+        await interaction.followup.send("❌ 権限がありません", ephemeral=True)
         return
     task["status"] = "doing"
 
@@ -692,10 +712,10 @@ async def start(interaction: discord.Interaction, index: int):
 
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❌ DBエラー", ephemeral=True)
+        await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
     
-    await interaction.response.send_message(f"🚀 進行中に変更！\n📌 {task['task']}")
+    await interaction.followup.send(f"🚀 進行中に変更！\n📌 {task['task']}")
 
 # -----------------------
 # リマインダー処理 check_tasks
