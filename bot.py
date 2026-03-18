@@ -62,7 +62,7 @@ def load_tasks():
         tasks_list = []
 
 # -----------------------
-# Flaskヘルスチェック
+# Flaskヘルスチェック & Discord Bot設定
 # -----------------------
 app = Flask(__name__)
 @app.route("/")
@@ -73,16 +73,16 @@ def run_web():
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=run_web, daemon=True).start()
 
-# -----------------------
 # Discord Bot設定
-# -----------------------
 intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 tasks_list = []
+load_tasks()
+
+threading.Thread(target=run_web, daemon=True).start()
 
 # サーバー専用 or グローバル
 GUILD_ID = os.environ.get("GUILD_ID")
@@ -128,6 +128,97 @@ def reminder_label(days: float) -> str:
     elif days >= 1/8: return "3時間前"
     elif days == 0: return "当日"
     else: return f"{int(days*86400)}秒前"
+
+
+# -----------------------
+# Flask画面追加
+# -----------------------
+from flask import render_template_string, request, redirect
+
+HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Task Manager</title>
+</head>
+<body>
+    <h1>タスク一覧</h1>
+
+    <form method="POST" action="/add_web">
+        <input name="task" placeholder="タスク名">
+        <input type="datetime-local" name="date">
+        <button type="submit">追加</button>
+    </form>
+
+    <ul>
+    {% for i, t in tasks %}
+        <li>
+            {{t["task"]}} | {{t["due"]}} | {{t["status"]}}
+            <a href="/done_web/{{i}}">完了</a>
+            <a href="/delete_web/{{i}}">削除</a>
+        </li>
+    {% endfor %}
+    </ul>
+</body>
+</html>
+"""
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template_string(HTML, tasks=list(enumerate(tasks_list)))
+
+# -----------------------
+# Webから追加用
+# -----------------------
+@app.route("/add_web", methods=["POST"])
+def add_web():
+    task_name = request.form.get("task")
+    date_str = request.form.get("date")  # ← これ追加
+
+    if not date_str:
+        due = datetime.datetime.now(JST).replace(hour=23, minute=59)
+    else:
+        try:
+            due = datetime.datetime.fromisoformat(date_str).replace(tzinfo=JST)
+        except:
+            return "日付エラー"
+
+    task = {
+        "task": task_name,
+        "due": due,
+        "channel_id": 0,
+        "owner_id": 0,
+        "visible_to": [],
+        "reminders": [0],
+        "notified": [],
+        "mention": False,
+        "roles": [],
+        "status": "todo",
+        "completed_by": None,
+        "completed_at": None
+    }
+
+    tasks_list.append(task)
+    save_tasks()
+    return redirect(f"/dashboard?key={SECRET}")
+
+# Webから完了
+@app.route("/done_web/<int:index>")
+def done_web(index):
+    if 0 <= index < len(tasks_list):
+        tasks_list[index]["status"] = "done"
+        tasks_list[index]["completed_at"] = datetime.datetime.now(JST).isoformat()
+        save_tasks()
+    return redirect(f"/dashboard?key={SECRET}")
+
+# Webから削除
+@app.route("/delete_web/<int:index>")
+def delete_web(index):
+    if 0 <= index < len(tasks_list):
+        tasks_list.pop(index)
+        save_tasks()
+    return redirect(f"/dashboard?key={SECRET}")
+
 
 # -----------------------
 # /list コマンド
@@ -390,38 +481,49 @@ async def start(interaction: discord.Interaction, index: int):
 @tasks.loop(seconds=30)
 async def check_tasks():
     now = datetime.datetime.now(JST)
-    to_remove=[]
+    to_remove = []
+    updated = False
+
     for task in tasks_list:
-        if task.get("status")=="done": continue
-        remaining=sorted([r for r in task["reminders"] if r not in task["notified"]],reverse=True)
-        if not remaining:
-            if now>=task["due"]+datetime.timedelta(days=30):
-                to_remove.append(task)
+        if task.get("status") == "done":
             continue
-        next_reminder=remaining[0]
-        reminder_time=task["due"]-datetime.timedelta(days=next_reminder)
-        if reminder_time<=now and next_reminder not in task["notified"]:
-            if now-reminder_time>datetime.timedelta(minutes=5):
-                task["notified"].append(next_reminder)
+
+        for r in task["reminders"]:
+            if r in task["notified"]:
                 continue
-            channel=bot.get_channel(task["channel_id"])
-            if not channel:
-                print(f"[WARN] channel not found: {task['channel_id']} ({task['task']})")
-                continue
-            mention_text=""
-            if task.get("mention",False):
-                user_mentions=[f"<@{uid}>" for uid in task["visible_to"]]
-                role_mentions=[f"<@&{rid}>" for rid in task.get("roles",[])]
-                mention_text=" ".join(user_mentions+role_mentions)
-            await channel.send(
-                f"{mention_text}\n⏰ {task['task']}\n🕒 {reminder_label(next_reminder)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
-            )
-            task["notified"].append(next_reminder)
-            save_tasks()
+
+            reminder_time = task["due"] - datetime.timedelta(days=r)
+
+            # 👇 ここが最重要修正
+            if reminder_time <= now < reminder_time + datetime.timedelta(seconds=30):
+                channel = bot.get_channel(task["channel_id"])
+                if not channel:
+                    print(f"[WARN] channel not found: {task['channel_id']} ({task['task']})")
+                    continue
+
+                mention_text = ""
+                if task.get("mention", False):
+                    user_mentions = [f"<@{uid}>" for uid in task["visible_to"]]
+                    role_mentions = [f"<@&{rid}>" for rid in task.get("roles", [])]
+                    mention_text = " ".join(user_mentions + role_mentions)
+
+                await channel.send(
+                    f"{mention_text}\n⏰ {task['task']}\n🕒 {reminder_label(r)} / 期限: {task['due'].strftime('%m/%d %H:%M')}"
+                )
+
+                task["notified"].append(r)
+                updated = True
+
+        # 期限＋1か月で削除
+        if now >= task["due"] + datetime.timedelta(days=30):
+            to_remove.append(task)
+
     for task in to_remove:
         tasks_list.remove(task)
         print(f"🗑️ タスク削除（期限+1か月）: {task['task']}")
-    if to_remove:
+        updated = True
+
+    if updated:
         save_tasks()
 
 # -----------------------
@@ -436,7 +538,15 @@ async def on_ready():
         await tree.sync()
         print("グローバルコマンドを同期しました")
     print(f"{bot.user} が起動しました！")
-    load_tasks()
     check_tasks.start()
 
+# セキュリティチェック
+SECRET = "mypassword"
+
+@app.before_request
+def check_auth():
+    if request.path != "/":
+        if request.args.get("key") != SECRET:
+            return "Unauthorized", 403
+        
 bot.run(os.environ.get("TOKEN"))
