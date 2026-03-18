@@ -44,7 +44,7 @@ def load_tasks():
         for t in data:
             tasks_list.append({
                 "task": t["task"],
-                "due": datetime.datetime.fromisoformat(t["due"]),
+                "due": datetime.datetime.fromisoformat(t["due"]).astimezone(JST),
                 "channel_id": t["channel_id"],
                 "owner_id": t["owner_id"],
                 "visible_to": t["visible_to"],
@@ -211,22 +211,35 @@ async def edit(
     # -----------------------
     # 日付変更
     # -----------------------
-    if date and time:
+    if date or time:
         try:
-            if len(date) == 4:
+            current_due = task["due"]
+
+            new_date = date
+            new_time = time
+
+            # 未指定は既存値使う
+            if not new_date:
+                new_date = current_due.strftime("%Y%m%d")
+            if not new_time:
+                new_time = current_due.strftime("%H%M")
+
+            # addと同じロジック
+            if len(new_date) == 4:
                 year = now.year
-                new_due = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+                new_due = datetime.datetime.strptime(f"{year}{new_date} {new_time}", "%Y%m%d %H%M").replace(tzinfo=JST)
                 if new_due < now:
                     new_due = new_due.replace(year=year+1)
-            elif len(date) == 8:
-                new_due = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+            elif len(new_date) == 8:
+                new_due = datetime.datetime.strptime(f"{new_date} {new_time}", "%Y%m%d %H%M").replace(tzinfo=JST)
             else:
                 raise ValueError
 
             task["due"] = new_due
-            task["notified"] = []  # リセット
+            task["notified"] = []
+
         except:
-            await interaction.response.send_message("❌ 日付形式が不正", ephemeral=True)
+            await interaction.response.send_message("❌ 日付/時間形式が不正", ephemeral=True)
             return
 
     # -----------------------
@@ -267,9 +280,9 @@ async def edit(
 )
 async def add(
     interaction: discord.Interaction,
-    date: str,
-    time: str,
     task_name: str,
+    date: str = None,
+    time: str = None,
     reminders: str = "",
     visible: str = "",
     channel: discord.TextChannel = None,
@@ -277,17 +290,52 @@ async def add(
     roles: str = "",
 ):
     now = datetime.datetime.now(JST)
+
     try:
-        if len(date) == 4:
-            year = now.year
-            due = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
-            if due < now: due = due.replace(year=year+1)
-        elif len(date) == 8:
-            due = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+        # 両方なし → 今日23:59
+        if not date and not time:
+            due = now.replace(hour=23, minute=59, second=0, microsecond=0)
+
+        # dateのみ → 00:00
+        elif date and not time:
+            if len(date) == 4:
+                year = now.year
+                due = datetime.datetime.strptime(f"{year}{date} 0000", "%Y%m%d %H%M").replace(tzinfo=JST)
+                if due < now:
+                    due = due.replace(year=year+1)
+            elif len(date) == 8:
+                due = datetime.datetime.strptime(f"{date} 0000", "%Y%m%d %H%M").replace(tzinfo=JST)
+            else:
+                raise ValueError
+
+        # timeのみ → 今日その時間
+        elif not date and time:
+            due = datetime.datetime.strptime(
+                now.strftime("%Y%m%d") + " " + time,
+                "%Y%m%d %H%M"
+            ).replace(tzinfo=JST)
+
+            if due < now:
+                await interaction.response.send_message(
+                    "⚠️ 指定時間は過去なので明日に設定されました",
+                    ephemeral=True
+                )
+                due += datetime.timedelta(days=1)
+
+        # 両方あり（従来）
         else:
-            raise ValueError
-    except ValueError:
-        await interaction.response.send_message("❌ 日付形式が不正", ephemeral=True)
+            if len(date) == 4:
+                year = now.year
+                due = datetime.datetime.strptime(f"{year}{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+                if due < now:
+                    due = due.replace(year=year+1)
+            elif len(date) == 8:
+                due = datetime.datetime.strptime(f"{date} {time}", "%Y%m%d %H%M").replace(tzinfo=JST)
+            else:
+                raise ValueError
+
+    except:
+        await interaction.response.send_message("❌ 日付/時間形式が不正", ephemeral=True)
         return
 
     # リマインド
