@@ -746,4 +746,3 @@ if __name__ == "__main__":
         target=lambda: bot.run(os.environ.get("TOKEN")),
         daemon=True
     ).start()
-    run_web()
