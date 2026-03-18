@@ -68,6 +68,7 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 8000))
+    print(f"Flask starting on {port}")
     app.run(host="0.0.0.0", port=port)
 
 
@@ -79,7 +80,11 @@ tree = app_commands.CommandTree(bot)
 tasks_list = []
 
 # db, cursor定義
-db, cursor = get_cursor()
+try:
+    db, cursor = get_cursor()
+except Exception as e:
+    print("DB接続失敗:", e)
+    db, cursor = None, None
 
 # Aiven接続安全化
 try:
@@ -88,7 +93,7 @@ except Exception as e:
     print("DB接続失敗:", e)
     tasks_list = []
 
-threading.Thread(target=run_web, daemon=True).start()
+threading.Thread(target=run_web).start()
 
 # サーバー専用 or グローバル
 GUILD_ID = os.environ.get("GUILD_ID")
