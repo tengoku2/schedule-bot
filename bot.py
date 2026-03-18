@@ -39,7 +39,7 @@ def load_tasks():
     global tasks_list
 
     if cursor is None:
-            return "DB未接続", 500
+            return
 
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
@@ -84,8 +84,6 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 tasks_list = []
-
-threading.Thread(target=run_web).start()
 
 # サーバー専用 or グローバル
 GUILD_ID = os.environ.get("GUILD_ID")
@@ -739,4 +737,13 @@ def check_auth():
         if request.args.get("key") != SECRET:
             return "Unauthorized", 403
         
-bot.run(os.environ.get("TOKEN"))
+
+# -----------------------
+# 起動（←一番最後に置く）
+# -----------------------
+if __name__ == "__main__":
+    threading.Thread(
+        target=lambda: bot.run(os.environ.get("TOKEN")),
+        daemon=True
+    ).start()
+    run_web()
