@@ -750,4 +750,6 @@ def start_bot():
     print("TOKEN:", token)
     bot.run(token)
 
-threading.Thread(target=start_bot, daemon=True).start()
+@app.before_first_request
+def start_background():
+    threading.Thread(target=start_bot, daemon=True).start()
