@@ -68,6 +68,15 @@ def load_tasks():
 # Flaskヘルスチェック & Discord Bot設定
 # -----------------------
 app = Flask(__name__)
+
+
+def start_bot():
+    token = os.environ.get("TOKEN")
+    print("TOKEN:", token)  # ←追加
+    bot.run(token)
+
+threading.Thread(target=start_bot, daemon=True).start()
+
 @app.route("/")
 def home():
     return "OK", 200
