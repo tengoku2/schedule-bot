@@ -810,11 +810,17 @@ SECRET = os.environ.get("SECRET", "mypassword")
         
 
 # -----------------------
-# 起動（←一番最後に置く）
+# 起動
 # -----------------------
 
-def start_bot():
-    import asyncio
-    asyncio.run(bot.start(os.environ.get("TOKEN")))
+if __name__ == "__main__":
+    # Flaskを裏で起動
+    def run_web():
+        port = int(os.environ.get("PORT", 8000))
+        print(f"Flask running on {port}")
+        app.run(host="0.0.0.0", port=port, debug=False)
 
-threading.Thread(target=start_bot, daemon=True).start()
+    threading.Thread(target=run_web, daemon=True).start()
+
+    # Botはメインスレッドで起動（これが正解）
+    bot.run(os.environ.get("TOKEN"))
