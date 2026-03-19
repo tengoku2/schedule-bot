@@ -161,11 +161,60 @@ async def list_tasks(interaction: discord.Interaction):
     await interaction.edit_original_response(content=msg)
 
 # -----------------------
+# リマインド機能
+# -----------------------
+from discord.ext import tasks
+
+@tasks.loop(seconds=30)
+async def reminder_loop():
+    now = datetime.datetime.now(JST)
+
+    for t in tasks_list:
+        if t["status"] != "todo":
+            continue
+
+        # 期限過ぎてたらスキップ
+        if t["due"] < now:
+            continue
+
+        # 24時間前リマインド（まずは1つだけ）
+        remind_time = t["due"] - datetime.timedelta(days=1)
+
+        # すでに通知済みならスキップ
+        if "1day" in t.get("notified", []):
+            continue
+
+        if now >= remind_time:
+            channel = bot.get_channel(t["channel_id"])
+            if channel:
+                await channel.send(f"⏰ リマインド: {t['task']}")
+
+            # DBに通知済み保存
+            db, cursor = get_cursor()
+            notified = t.get("notified", [])
+            notified.append("1day")
+
+            cursor.execute(
+                "UPDATE tasks SET notified=%s WHERE id=%s",
+                (json.dumps(notified), t["id"])
+            )
+            db.commit()
+            db.close()
+
+# -----------------------
 # 起動
 # -----------------------
 @bot.event
 async def on_ready():
     print("🚀 起動完了")
+
+    await asyncio.to_thread(load_tasks)
+
+    await tree.sync(guild=GUILD)
+
+    reminder_loop.start()  # ←これ追加
+
+    print("🔔 リマインド開始")
 
     try:
         await asyncio.to_thread(load_tasks)
