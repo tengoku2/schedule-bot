@@ -34,6 +34,7 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 # MySQL読み込み/ load_tasks
 # -----------------------
 def load_tasks():
+    global tasks_list
     print("🔄 load_tasks開始")
 
     db, cursor = get_cursor()
@@ -801,15 +802,12 @@ async def check_tasks():
 @bot.event
 async def on_ready():
     print("🚀 on_ready開始")
-    await asyncio.to_thread(load_tasks)
-    print("✅ 初期load_tasks完了")
 
-    if GUILD_OBJ:
-        await tree.sync(guild=GUILD_OBJ)
-        print(f"サーバー専用コマンドを {GUILD_ID} に同期しました")
-    else:
-        await tree.sync()
-        print("グローバルコマンドを同期しました")
+    await asyncio.to_thread(load_tasks)
+
+    await tree.sync()  # ← 強制グローバル同期
+    print("🌍 グローバルコマンド同期")
+
     print(f"{bot.user} が起動しました！")
     check_tasks.start()
 
