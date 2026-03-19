@@ -1,13 +1,28 @@
 import os
 import discord
-from discord.ext import tasks
 from discord import app_commands
+from discord.ext import tasks
 import datetime
 import json
 import asyncio
 import mysql.connector
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
+
+# -----------------------
+# Flask（Koyeb用）
+# -----------------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "OK", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_web, daemon=True).start()
 
 # -----------------------
 # DB接続
@@ -43,8 +58,6 @@ def load_tasks():
     db, cursor = get_cursor()
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
-
-    print("📦 rows取得:", len(rows))
 
     new_list = []
     for t in rows:
@@ -111,19 +124,17 @@ async def list_tasks(interaction: discord.Interaction):
     await interaction.followup.send(msg)
 
 # -----------------------
-# /add（修正版）
+# /add（完全安定版）
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
 
-    await interaction.response.defer()
+    # 👇 最速応答（超重要）
+    await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
 
-    # -----------------------
-    # DB保存
-    # -----------------------
     try:
         db, cursor = get_cursor()
 
@@ -150,17 +161,13 @@ async def add(interaction: discord.Interaction, task_name: str):
 
     except Exception as e:
         print("❌ DBエラー:", e)
-        await interaction.followup.send("❌ DBエラー")
+        await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    # -----------------------
-    # 即レス（最重要）
-    # -----------------------
-    await interaction.followup.send(f"✅ 追加: {task_name}")
+    # 👇 表示更新（これが最強パターン）
+    await interaction.edit_original_response(content=f"✅ 追加: {task_name}")
 
-    # -----------------------
-    # 裏で更新（重い処理）
-    # -----------------------
+    # 👇 裏で更新
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
@@ -172,22 +179,6 @@ async def on_ready():
 
     await asyncio.to_thread(load_tasks)
     await tree.sync()
-
-# -----------------------
-# Koyeb用 Webサーバー
-# -----------------------
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def run_web():
-    port = int(os.environ.get("PORT", 8000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
-
-threading.Thread(target=run_web, daemon=True).start()
 
 # -----------------------
 # 実行
