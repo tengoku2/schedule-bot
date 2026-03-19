@@ -69,6 +69,7 @@ def load_tasks():
             "owner_id": t["owner_id"],
             "visible_to": json.loads(t["visible_to"] or "[]"),
             "status": t["status"],
+            "notified": json.loads(t["notified"] or "[]"),
         })
 
     tasks_list = new_list
@@ -165,6 +166,25 @@ async def list_tasks(interaction: discord.Interaction):
 # -----------------------
 from discord.ext import tasks
 
+REMINDERS = [
+    ("1month", 30),
+    ("2weeks", 14),
+    ("1week", 7),
+    ("3days", 3),
+    ("1day", 1),
+    ("3hours", 3/24),
+]
+
+def label_to_text(label):
+    return {
+        "1month": "1ヶ月前",
+        "2weeks": "2週間前",
+        "1week": "1週間前",
+        "3days": "3日前",
+        "1day": "24時間前",
+        "3hours": "3時間前",
+    }.get(label, label)
+
 @tasks.loop(seconds=30)
 async def reminder_loop():
     now = datetime.datetime.now(JST)
@@ -173,33 +193,33 @@ async def reminder_loop():
         if t["status"] != "todo":
             continue
 
-        # 期限過ぎてたらスキップ
         if t["due"] < now:
             continue
 
-        # 24時間前リマインド（まずは1つだけ）
-        remind_time = t["due"] - datetime.timedelta(days=1)
+        notified = t.get("notified", [])
 
-        # すでに通知済みならスキップ
-        if "1day" in t.get("notified", []):
-            continue
+        for label, days in REMINDERS:
+            if label in notified:
+                continue
 
-        if now >= remind_time:
-            channel = bot.get_channel(t["channel_id"])
-            if channel:
-                await channel.send(f"⏰ リマインド: {t['task']}")
+            remind_time = t["due"] - datetime.timedelta(days=days)
 
-            # DBに通知済み保存
-            db, cursor = get_cursor()
-            notified = t.get("notified", [])
-            notified.append("1day")
+            if now >= remind_time:
+                channel = bot.get_channel(t["channel_id"])
+                if channel:
+                    await channel.send(
+                        f"⏰ {label_to_text(label)}リマインド: {t['task']}"
+                    )
 
-            cursor.execute(
-                "UPDATE tasks SET notified=%s WHERE id=%s",
-                (json.dumps(notified), t["id"])
-            )
-            db.commit()
-            db.close()
+                notified.append(label)
+
+                db, cursor = get_cursor()
+                cursor.execute(
+                    "UPDATE tasks SET notified=%s WHERE id=%s",
+                    (json.dumps(notified), t["id"])
+                )
+                db.commit()
+                db.close()
 
 # -----------------------
 # 起動
@@ -208,14 +228,6 @@ async def reminder_loop():
 async def on_ready():
     print("🚀 起動完了")
 
-    await asyncio.to_thread(load_tasks)
-
-    await tree.sync(guild=GUILD)
-
-    reminder_loop.start()  # ←これ追加
-
-    print("🔔 リマインド開始")
-
     try:
         await asyncio.to_thread(load_tasks)
     except Exception as e:
@@ -223,6 +235,9 @@ async def on_ready():
 
     await tree.sync()
     print("✅ コマンド同期完了")
+
+    reminder_loop.start()
+    print("🔔 リマインド開始")
 
 # -----------------------
 # 実行
