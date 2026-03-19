@@ -183,26 +183,24 @@ async def on_ready():
     check_tasks.start()
 
 # -----------------------
-# リマインド
+# ミニWebサーバー（Koyeb用）
 # -----------------------
-@tasks.loop(seconds=30)
-async def check_tasks():
-    now = datetime.datetime.now(JST)
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    for task in tasks_list:
-        if task["status"] == "done":
-            continue
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
 
-        for r in task["reminders"]:
-            if r in task["notified"]:
-                continue
+def run_web():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
 
-            if task["due"] - datetime.timedelta(days=r) <= now:
-                channel = bot.get_channel(task["channel_id"])
-                if channel:
-                    await channel.send(f"⏰ {task['task']}")
+threading.Thread(target=run_web, daemon=True).start()
 
-                task["notified"].append(r)
 
 # -----------------------
 # 実行
