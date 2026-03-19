@@ -464,7 +464,7 @@ async def add(
         return
 
     # DBから再読み込み（超重要）
-    load_tasks()
+    await asyncio.to_thread(load_tasks)
 
     await interaction.followup.send(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
@@ -540,7 +540,7 @@ async def edit(
 
     
 
-    # DB保存
+    # DB更新
     try:
         db, cursor = get_cursor()
         
@@ -565,6 +565,8 @@ async def edit(
         await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
 
+    # 更新処理
+    await asyncio.to_thread(load_tasks)
     await interaction.followup.send(
         f"✅ タスク更新: {task['task']}（期限: {task['due'].strftime('%Y-%m-%d %H:%M')}）"
     )
@@ -602,7 +604,7 @@ async def delete(interaction: discord.Interaction, index: int):
 
         db.commit()
         db.close()
-        load_tasks()
+        await asyncio.to_thread(load_tasks)
 
     except Exception as e:
         print(e)
@@ -651,7 +653,7 @@ async def done(interaction: discord.Interaction, index: int):
 
         db.commit()
         db.close()
-        load_tasks()
+        await asyncio.to_thread(load_tasks)
 
     except Exception as e:
         print(e)
@@ -709,7 +711,7 @@ async def start(interaction: discord.Interaction, index: int):
 
         db.commit()
         db.close()
-        load_tasks()
+        await asyncio.to_thread(load_tasks)
 
     except Exception as e:
         print(e)
