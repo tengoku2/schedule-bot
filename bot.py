@@ -6,6 +6,7 @@ from flask import Flask
 import threading
 import datetime
 import json
+import asyncio
 import mysql.connector
 
 def get_db():
@@ -786,7 +787,7 @@ async def check_tasks():
 # -----------------------
 @bot.event
 async def on_ready():
-    load_tasks()
+    await asyncio.to_thread(load_tasks)
 
     if GUILD_OBJ:
         await tree.sync(guild=GUILD_OBJ)
@@ -810,17 +811,11 @@ SECRET = os.environ.get("SECRET", "mypassword")
         
 
 # -----------------------
-# 起動
+# 起動（←一番最後に置く）
 # -----------------------
 
-if __name__ == "__main__":
-    # Flaskを裏で起動
-    def run_web():
-        port = int(os.environ.get("PORT", 8000))
-        print(f"Flask running on {port}")
-        app.run(host="0.0.0.0", port=port, debug=False)
+def start_bot():
+    asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-    threading.Thread(target=run_web, daemon=True).start()
-
-    # Botはメインスレッドで起動（これが正解）
-    bot.run(os.environ.get("TOKEN"))
+if os.environ.get("PORT"):  # ← Koyebで確実にある
+    threading.Thread(target=start_bot, daemon=True).start()
