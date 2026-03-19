@@ -362,7 +362,9 @@ async def add(
     everyone: bool = False,
 ):
     now = datetime.datetime.now(JST)
+    print("① add開始")  # ←test
     await interaction.response.defer()  # 追加！！！
+    print("② defer完了")  # ←test
 
     # 日付処理  
     if date and len(date)==3: date=date.zfill(4)
@@ -391,6 +393,7 @@ async def add(
     except:
         await interaction.followup.send("❌ 日付/時間形式が不正", ephemeral=True)
         return
+    print("③ 日付処理OK", due) # test
     
     if reminders:
         reminders_list=parse_reminders(reminders)
@@ -431,6 +434,7 @@ async def add(
     
     tasks_list.append(task)
 
+    print("④ DB接続前") # test
     
 
    # DB保存
@@ -457,15 +461,19 @@ async def add(
 
         db.commit()
         db.close()
-
+        print("⑤ DB保存OK") # test
+    
     except Exception as e:
         print(e)
         await interaction.followup.send("❌ DBエラー", ephemeral=True)
         return
-
+    
+    
+    print("⑥ load_tasks前") # test
     # DBから再読み込み（超重要）
     await asyncio.to_thread(load_tasks)
-
+    print("⑦ load_tasks後") # test
+    print("⑧ 送信前") # test
     await interaction.followup.send(
         f"✅ タスク登録: {task_name}（期限: {due.strftime('%Y-%m-%d %H:%M')}）\n"
         f"リマインド: {', '.join([reminder_label(r) for r in filtered_reminders])}\n"
@@ -473,6 +481,7 @@ async def add(
         f"📢 チャンネル: <#{channel_id}>\n"
         f"💬 メンション: {'ON' if mention else 'OFF'}"
     )
+    print("⑨ 完了") # test
 
 # -----------------------
 # /edit コマンド
