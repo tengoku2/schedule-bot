@@ -838,5 +838,5 @@ SECRET = os.environ.get("SECRET", "mypassword")
 def start_bot():
     asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-# if os.environ.get("PORT"):  # ← Koyebで確実にある
-    # threading.Thread(target=start_bot, daemon=True).start()
+if os.environ.get("PORT"):  # ← Koyebで確実にある
+    threading.Thread(target=start_bot, daemon=True).start()
