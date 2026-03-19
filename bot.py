@@ -71,10 +71,18 @@ def load_tasks():
 # -----------------------
 app = Flask(__name__)
 
+started = False
+
 @app.route("/")
 def home():
-    return "OK", 200
+    global started
 
+    if not started:
+        print("🔥 Bot起動")
+        threading.Thread(target=start_bot, daemon=True).start()
+        started = True
+
+    return "OK", 200
 def run_web():
     port = int(os.environ.get("PORT", 8000))
     print(f"Flask starting on {port}")
@@ -830,5 +838,5 @@ SECRET = os.environ.get("SECRET", "mypassword")
 def start_bot():
     asyncio.run(bot.start(os.environ.get("TOKEN")))
 
-if os.environ.get("PORT"):  # ← Koyebで確実にある
-    threading.Thread(target=start_bot, daemon=True).start()
+# if os.environ.get("PORT"):  # ← Koyebで確実にある
+    # threading.Thread(target=start_bot, daemon=True).start()
