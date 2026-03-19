@@ -1,7 +1,6 @@
 import os
 import discord
 from discord import app_commands
-from discord.ext import tasks
 import datetime
 import json
 import asyncio
@@ -68,14 +67,7 @@ def load_tasks():
             "channel_id": t["channel_id"],
             "owner_id": t["owner_id"],
             "visible_to": json.loads(t["visible_to"] or "[]"),
-            "reminders": json.loads(t["reminders"] or "[]"),
-            "notified": json.loads(t["notified"] or "[]"),
-            "mention": t["mention"],
-            "roles": json.loads(t["roles"] or "[]"),
             "status": t["status"],
-            "completed_by": t["completed_by"],
-            "completed_at": t["completed_at"],
-            "everyone": t["everyone"],
         })
 
     tasks_list = new_list
@@ -85,45 +77,16 @@ def load_tasks():
 # Discord設定
 # -----------------------
 intents = discord.Intents.default()
-intents.message_content = True
-
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# -----------------------
-# 権限
-# -----------------------
-def can_view(task, user):
-    if user.guild_permissions.administrator:
-        return True
-    if not task["visible_to"]:
-        return True
-    if user.id in task["visible_to"]:
-        return True
-    user_roles = [r.id for r in user.roles]
-    return any(r in user_roles for r in task.get("roles", []))
+# 👇 自分のサーバーID入れる
+GUILD_ID = 1479381180146257950
+GUILD = discord.Object(id=GUILD_ID)
 
 # -----------------------
-# /list
+# DB INSERT
 # -----------------------
-@tree.command(name="list", description="タスク一覧")
-async def list_tasks(interaction: discord.Interaction):
-    await interaction.response.defer()
-
-    visible = [t for t in tasks_list if can_view(t, interaction.user) and t["status"] != "done"]
-
-    if not visible:
-        await interaction.followup.send("📭 タスクなし")
-        return
-
-    msg = "📋 タスク一覧\n"
-    for i, t in enumerate(visible, 1):
-        msg += f"{i}. {t['task']}（<@{t['owner_id']}>）\n"
-        msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n\n"
-
-    await interaction.followup.send(msg)
-
-
 def insert_task(task_name, due, channel_id, user_id):
     db, cursor = get_cursor()
 
@@ -151,42 +114,53 @@ def insert_task(task_name, due, channel_id, user_id):
 # -----------------------
 # /add
 # -----------------------
-@tree.command(name="add", description="タスク追加")
+@tree.command(name="add", description="タスク追加", guild=GUILD)
 async def add(interaction: discord.Interaction, task_name: str):
 
-    print("🔥 /add 呼ばれた")  # デバッグ
+    print("🔥 /add 呼ばれた")
 
-    # 👇 最速応答（これが命）
     await interaction.response.defer(ephemeral=True)
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
 
     try:
-        print("① DB処理開始")
-
         await asyncio.to_thread(
             insert_task,
             task_name,
             due,
-            interaction.channel.id,   # ← ここ重要
+            interaction.channel.id,
             interaction.user.id
         )
-
-        print("② DB処理完了")
+        print("✅ DB OK")
 
     except Exception as e:
         print("❌ DBエラー:", e)
         await interaction.followup.send("❌ DBエラー")
         return
 
-    print("③ 返信送信")
-
     await interaction.followup.send(f"✅ 追加: {task_name}")
 
-    print("④ load_tasks開始")
-
     asyncio.create_task(asyncio.to_thread(load_tasks))
+
+# -----------------------
+# /list
+# -----------------------
+@tree.command(name="list", description="タスク一覧", guild=GUILD)
+async def list_tasks(interaction: discord.Interaction):
+
+    await interaction.response.defer()
+
+    if not tasks_list:
+        await interaction.followup.send("📭 タスクなし")
+        return
+
+    msg = "📋 タスク一覧\n"
+    for i, t in enumerate(tasks_list, 1):
+        msg += f"{i}. {t['task']}\n"
+        msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n\n"
+
+    await interaction.followup.send(msg)
 
 # -----------------------
 # 起動
@@ -197,10 +171,8 @@ async def on_ready():
 
     await asyncio.to_thread(load_tasks)
 
-    tree.clear_commands(guild=None)  # ← 追加
-    await tree.sync()
-
-    print("🔄 コマンド完全リセット")
+    await tree.sync(guild=GUILD)  # ←これが最重要
+    print("✅ コマンド同期完了")
 
 # -----------------------
 # 実行
