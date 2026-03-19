@@ -204,7 +204,7 @@ async def reminder_loop():
 
             remind_time = t["due"] - datetime.timedelta(days=days)
 
-            if now >= remind_time:
+            if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
                     await channel.send(
