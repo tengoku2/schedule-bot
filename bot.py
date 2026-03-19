@@ -109,14 +109,15 @@ def insert_task(task_name, due, channel_id, user_id):
     db.close()
 
 # -----------------------
-# /add
+# /add（完全安定版）
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
 
     print("🔥 /add 呼ばれた")
 
-    await interaction.response.defer(ephemeral=True)
+    # 👇 即レス（これが命）
+    await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
@@ -133,10 +134,10 @@ async def add(interaction: discord.Interaction, task_name: str):
 
     except Exception as e:
         print("❌ DBエラー:", e)
-        await interaction.followup.send("❌ DBエラー")
+        await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    await interaction.followup.send(f"✅ 追加: {task_name}")
+    await interaction.edit_original_response(content=f"✅ 追加: {task_name}")
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
@@ -146,10 +147,10 @@ async def add(interaction: discord.Interaction, task_name: str):
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    await interaction.response.defer()
+    await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
 
     if not tasks_list:
-        await interaction.followup.send("📭 タスクなし")
+        await interaction.edit_original_response(content="📭 タスクなし")
         return
 
     msg = "📋 タスク一覧\n"
@@ -157,7 +158,7 @@ async def list_tasks(interaction: discord.Interaction):
         msg += f"{i}. {t['task']}\n"
         msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n\n"
 
-    await interaction.followup.send(msg)
+    await interaction.edit_original_response(content=msg)
 
 # -----------------------
 # 起動
@@ -166,15 +167,12 @@ async def list_tasks(interaction: discord.Interaction):
 async def on_ready():
     print("🚀 起動完了")
 
-    # DBは失敗してもOKにする
     try:
         await asyncio.to_thread(load_tasks)
     except Exception as e:
         print("❌ load_tasks失敗:", e)
 
-    # コマンドは必ず登録
     await tree.sync()
-
     print("✅ コマンド同期完了")
 
 # -----------------------
