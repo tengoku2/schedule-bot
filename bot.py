@@ -29,11 +29,12 @@ threading.Thread(target=run_web, daemon=True).start()
 def get_db():
     return mysql.connector.connect(
         host=os.environ.get("DB_HOST"),
-        port=int(os.environ.get("DB_PORT", 15042)),
+        port=int(os.environ.get("DB_PORT", 15040)),
         user=os.environ.get("DB_USER"),
         password=os.environ.get("DB_PASS"),
         database=os.environ.get("DB_NAME"),
-        ssl_disabled=False
+        ssl_disabled=False,
+        ssl_verify_cert=False  # ← これ追加！！
     )
 
 def get_cursor():
