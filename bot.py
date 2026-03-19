@@ -123,51 +123,53 @@ async def list_tasks(interaction: discord.Interaction):
 
     await interaction.followup.send(msg)
 
+
+def insert_task(task_name, due, channel_id, user_id):
+    db, cursor = get_cursor()
+
+    cursor.execute("""
+    INSERT INTO tasks 
+    (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        task_name,
+        due,
+        channel_id,
+        user_id,
+        json.dumps([]),
+        json.dumps([]),
+        json.dumps([0]),
+        json.dumps([]),
+        False,
+        False,
+        "todo"
+    ))
+
+    db.commit()
+    db.close()
+
 # -----------------------
 # /add（完全安定版）
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
 
-    # 👇 最速応答（超重要）
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
 
     try:
-        db, cursor = get_cursor()
-
-        cursor.execute("""
-        INSERT INTO tasks 
-        (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (
-            task_name,
-            due,
-            interaction.channel.id,
-            interaction.user.id,
-            json.dumps([]),
-            json.dumps([]),
-            json.dumps([0]),
-            json.dumps([]),
-            False,
-            False,
-            "todo"
-        ))
-
-        db.commit()
-        db.close()
+        # 👇 ここが最重要！！！！！
+        await asyncio.to_thread(insert_task, task_name, due, interaction)
 
     except Exception as e:
         print("❌ DBエラー:", e)
         await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    # 👇 表示更新（これが最強パターン）
     await interaction.edit_original_response(content=f"✅ 追加: {task_name}")
 
-    # 👇 裏で更新
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
