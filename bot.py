@@ -169,10 +169,16 @@ async def list_tasks(interaction: discord.Interaction):
 async def on_ready():
     print("🚀 起動完了")
 
+    for guild in bot.guilds:
+        print("👉 BOTが入ってるサーバー:", guild.name, guild.id)
+
     await asyncio.to_thread(load_tasks)
 
-    await tree.sync(guild=GUILD)  # ←これが最重要
-    print("✅ コマンド同期完了")
+    # 👇 一回消してから登録（超重要）
+    tree.clear_commands(guild=GUILD)
+    await tree.sync(guild=GUILD)
+
+    print("🔥 コマンド強制再登録 完了")
 
 # -----------------------
 # 実行
