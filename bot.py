@@ -173,9 +173,13 @@ async def on_ready():
     for guild in bot.guilds:
         print("👉 BOTが入ってるサーバー:", guild.name, guild.id)
 
-    await asyncio.to_thread(load_tasks)
+    # 👇 DBエラーを無視
+    try:
+        await asyncio.to_thread(load_tasks)
+    except Exception as e:
+        print("❌ load_tasks失敗:", e)
 
-    # 👇 これ超重要
+    # 👇 これ絶対通す
     tree.clear_commands(guild=GUILD)
     await tree.sync(guild=GUILD)
 
