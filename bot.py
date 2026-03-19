@@ -34,7 +34,7 @@ def get_db():
         password=os.environ.get("DB_PASS"),
         database=os.environ.get("DB_NAME"),
         ssl_disabled=False,
-        ssl_verify_cert=False  # ← これ追加！！
+        ssl_verify_cert=False
     )
 
 def get_cursor():
@@ -81,10 +81,6 @@ intents = discord.Intents.default()
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# 👇 自分のサーバーID入れる
-GUILD_ID = 1479381180146257950
-GUILD = discord.Object(id=GUILD_ID)
-
 # -----------------------
 # DB INSERT
 # -----------------------
@@ -115,7 +111,7 @@ def insert_task(task_name, due, channel_id, user_id):
 # -----------------------
 # /add
 # -----------------------
-@tree.command(name="add", description="タスク追加", guild=GUILD)
+@tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
 
     print("🔥 /add 呼ばれた")
@@ -147,7 +143,7 @@ async def add(interaction: discord.Interaction, task_name: str):
 # -----------------------
 # /list
 # -----------------------
-@tree.command(name="list", description="タスク一覧", guild=GUILD)
+@tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
     await interaction.response.defer()
@@ -170,20 +166,16 @@ async def list_tasks(interaction: discord.Interaction):
 async def on_ready():
     print("🚀 起動完了")
 
-    for guild in bot.guilds:
-        print("👉 BOTが入ってるサーバー:", guild.name, guild.id)
-
-    # 👇 DBエラーを無視
+    # DBは失敗してもOKにする
     try:
         await asyncio.to_thread(load_tasks)
     except Exception as e:
         print("❌ load_tasks失敗:", e)
 
-    # 👇 これ絶対通す
-    tree.clear_commands(guild=GUILD)
-    await tree.sync(guild=GUILD)
+    # コマンドは必ず登録
+    await tree.sync()
 
-    print("✅ ギルドコマンド同期完了")
+    print("✅ コマンド同期完了")
 
 # -----------------------
 # 実行
