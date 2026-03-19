@@ -175,11 +175,11 @@ async def on_ready():
 
     await asyncio.to_thread(load_tasks)
 
-    # 👇 一回消してから登録（超重要）
+    # 👇 これ超重要
     tree.clear_commands(guild=GUILD)
     await tree.sync(guild=GUILD)
 
-    print("🔥 コマンド強制再登録 完了")
+    print("✅ ギルドコマンド同期完了")
 
 # -----------------------
 # 実行
