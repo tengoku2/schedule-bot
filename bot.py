@@ -34,12 +34,14 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 # MySQL読み込み/ load_tasks
 # -----------------------
 def load_tasks():
-    global tasks_list
+    print("🔄 load_tasks開始")
 
     db, cursor = get_cursor()
 
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
+
+    print("📦 rows取得:", len(rows))
 
     tasks_list = []
 
@@ -798,7 +800,9 @@ async def check_tasks():
 # -----------------------
 @bot.event
 async def on_ready():
+    print("🚀 on_ready開始")
     await asyncio.to_thread(load_tasks)
+    print("✅ 初期load_tasks完了")
 
     if GUILD_OBJ:
         await tree.sync(guild=GUILD_OBJ)
