@@ -161,7 +161,14 @@ async def add(interaction: discord.Interaction, task_name: str):
 
     try:
         # 👇 ここが最重要！！！！！
-        await asyncio.to_thread(insert_task, task_name, due, interaction)
+        await asyncio.to_thread(
+            insert_task,
+            task_name,
+            due,
+            interaction.channel_id,
+            interaction.user.id
+        )
+        print("ARGS確認", task_name, due, interaction.channel.id, interaction.user.id)
 
     except Exception as e:
         print("❌ DBエラー:", e)
