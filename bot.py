@@ -113,15 +113,29 @@ def insert_task(task_name, due, channel_id, user_id):
 # /add（完全安定版）
 # -----------------------
 @tree.command(name="add", description="タスク追加")
-async def add(interaction: discord.Interaction, task_name: str):
+async def add(
+    interaction: discord.Interaction,
+    task_name: str,
+    due_date: str,   # 例: 2026-03-25
+    due_time: str    # 例: 18:00
+):
 
     print("🔥 /add 呼ばれた")
 
-    # 👇 即レス（これが命）
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
-    now = datetime.datetime.now(JST)
-    due = now + datetime.timedelta(days=1)
+    try:
+        # 👇 日時パース
+        due = datetime.datetime.strptime(
+            f"{due_date} {due_time}",
+            "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=JST)
+
+    except Exception:
+        await interaction.edit_original_response(
+            content="❌ 日時形式エラー\n例: 2026-03-25 18:00"
+        )
+        return
 
     try:
         await asyncio.to_thread(
@@ -138,7 +152,9 @@ async def add(interaction: discord.Interaction, task_name: str):
         await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    await interaction.edit_original_response(content=f"✅ 追加: {task_name}")
+    await interaction.edit_original_response(
+        content=f"✅ 追加: {task_name}\n📅 {due.strftime('%m/%d %H:%M')}"
+    )
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
