@@ -187,7 +187,11 @@ async def on_ready():
     print("🚀 起動完了")
 
     await asyncio.to_thread(load_tasks)
+
+    tree.clear_commands(guild=None)  # ← 追加
     await tree.sync()
+
+    print("🔄 コマンド完全リセット")
 
 # -----------------------
 # 実行
