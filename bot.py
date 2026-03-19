@@ -6,6 +6,8 @@ import datetime
 import json
 import asyncio
 import mysql.connector
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # -----------------------
 # DB接続
@@ -44,9 +46,9 @@ def load_tasks():
 
     print("📦 rows取得:", len(rows))
 
-    tasks_list = []
+    new_list = []
     for t in rows:
-        tasks_list.append({
+        new_list.append({
             "id": t["id"],
             "task": t["task"],
             "due": t["due"].astimezone(JST),
@@ -63,6 +65,7 @@ def load_tasks():
             "everyone": t["everyone"],
         })
 
+    tasks_list = new_list
     db.close()
 
 # -----------------------
@@ -87,26 +90,6 @@ def can_view(task, user):
     user_roles = [r.id for r in user.roles]
     return any(r in user_roles for r in task.get("roles", []))
 
-def can_edit(task, user):
-    return user.guild_permissions.administrator or task["owner_id"] == user.id
-
-# -----------------------
-# リマインド
-# -----------------------
-def parse_reminders(reminder_str):
-    mapping = {
-        "1週間": 7, "3日前": 3, "24時間": 1,
-        "3時間": 0.125, "10秒前": 10/86400
-    }
-    return [mapping[r.strip()] for r in reminder_str.split(",") if r.strip() in mapping]
-
-def reminder_label(days):
-    if days >= 7: return "1週間前"
-    elif days >= 3: return "3日前"
-    elif days >= 1: return "24時間前"
-    elif days >= 1/8: return "3時間前"
-    else: return f"{int(days*86400)}秒前"
-
 # -----------------------
 # /list
 # -----------------------
@@ -128,15 +111,19 @@ async def list_tasks(interaction: discord.Interaction):
     await interaction.followup.send(msg)
 
 # -----------------------
-# /add
+# /add（修正版）
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
+
     await interaction.response.defer()
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
 
+    # -----------------------
+    # DB保存
+    # -----------------------
     try:
         db, cursor = get_cursor()
 
@@ -162,13 +149,19 @@ async def add(interaction: discord.Interaction, task_name: str):
         db.close()
 
     except Exception as e:
-        print(e)
+        print("❌ DBエラー:", e)
         await interaction.followup.send("❌ DBエラー")
         return
 
-    await asyncio.to_thread(load_tasks)
-
+    # -----------------------
+    # 即レス（最重要）
+    # -----------------------
     await interaction.followup.send(f"✅ 追加: {task_name}")
+
+    # -----------------------
+    # 裏で更新（重い処理）
+    # -----------------------
+    asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
 # 起動
@@ -180,14 +173,9 @@ async def on_ready():
     await asyncio.to_thread(load_tasks)
     await tree.sync()
 
-    check_tasks.start()
-
 # -----------------------
-# ミニWebサーバー（Koyeb用）
+# Koyeb用 Webサーバー
 # -----------------------
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -200,7 +188,6 @@ def run_web():
     server.serve_forever()
 
 threading.Thread(target=run_web, daemon=True).start()
-
 
 # -----------------------
 # 実行
