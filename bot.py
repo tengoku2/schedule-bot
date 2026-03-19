@@ -149,33 +149,42 @@ def insert_task(task_name, due, channel_id, user_id):
     db.close()
 
 # -----------------------
-# /add（完全安定版）
+# /add
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(interaction: discord.Interaction, task_name: str):
 
-    await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
+    print("🔥 /add 呼ばれた")  # デバッグ
+
+    # 👇 最速応答（これが命）
+    await interaction.response.defer(ephemeral=True)
 
     now = datetime.datetime.now(JST)
     due = now + datetime.timedelta(days=1)
 
     try:
-        # 👇 ここが最重要！！！！！
+        print("① DB処理開始")
+
         await asyncio.to_thread(
             insert_task,
             task_name,
             due,
-            interaction.channel_id,
+            interaction.channel.id,   # ← ここ重要
             interaction.user.id
         )
-        print("ARGS確認", task_name, due, interaction.channel.id, interaction.user.id)
+
+        print("② DB処理完了")
 
     except Exception as e:
         print("❌ DBエラー:", e)
-        await interaction.edit_original_response(content="❌ DBエラー")
+        await interaction.followup.send("❌ DBエラー")
         return
 
-    await interaction.edit_original_response(content=f"✅ 追加: {task_name}")
+    print("③ 返信送信")
+
+    await interaction.followup.send(f"✅ 追加: {task_name}")
+
+    print("④ load_tasks開始")
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
