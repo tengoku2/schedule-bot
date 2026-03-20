@@ -425,28 +425,41 @@ async def reminder_loop():
     JST = datetime.timezone(datetime.timedelta(hours=9))
     now = datetime.datetime.now(JST)
 
+    print("==== LOOP START ====")
+    print("NOW:", now)
+
+    # 🔥 最新DB読み込み
     await asyncio.to_thread(load_tasks)
-    
+
+    print("TASK COUNT:", len(tasks_list))
+
     for t in tasks_list:
-        if t["status"] != "todo":
-            continue
+        print("\n--- TASK ---")
+        print("TASK:", t["task"])
 
         due = t["due"]
 
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
 
+        print("DUE:", due)
+
         if due < now:
+            print("SKIP: 過去タスク")
             continue
 
         notified = t.get("notified", [])
         reminder_settings = t.get("reminders", [])
+
+        print("REMINDERS:", reminder_settings)
+        print("NOTIFIED:", notified)
 
         import re
 
         for label in reminder_settings:
             match = re.match(r"(\d+)", label)
             if not match:
+                print("SKIP: フォーマット不正", label)
                 continue
 
             num = int(match.group(1))
@@ -460,14 +473,21 @@ async def reminder_loop():
             elif "hour" in label:
                 days = num / 24
             else:
-                continue
-
-            if label in notified:
+                print("SKIP: 単位不明", label)
                 continue
 
             remind_time = due - datetime.timedelta(days=days)
 
+            print(f"CHECK: {label}")
+            print("  remind_time:", remind_time)
+
+            if label in notified:
+                print("  SKIP: 既に通知済み")
+                continue
+
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
+                print("  🔥 HIT!!!! SEND!!!!")
+
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
                     await channel.send(
@@ -483,6 +503,8 @@ async def reminder_loop():
                 )
                 db.commit()
                 db.close()
+            else:
+                print("  NO HIT")
 
 # -----------------------
 # 起動
