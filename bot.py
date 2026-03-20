@@ -425,6 +425,8 @@ async def reminder_loop():
     JST = datetime.timezone(datetime.timedelta(hours=9))
     now = datetime.datetime.now(JST)
 
+    await asyncio.to_thread(load_tasks)
+    
     for t in tasks_list:
         if t["status"] != "todo":
             continue
