@@ -300,10 +300,12 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    # 🔥 deferやめる
     await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
 
-    # 🔥 その後処理
+    # 🔥 1回だけ取得
+    now = datetime.datetime.now()
+
+    # DB更新
     await asyncio.to_thread(load_tasks)
 
     if not tasks_list:
@@ -321,6 +323,30 @@ async def list_tasks(interaction: discord.Interaction):
         for r in t.get("reminders", []):
             if isinstance(r, list):
                 r = r[0]
+
+            import re
+            match = re.match(r"(\d+)", r)
+            if not match:
+                continue
+
+            num = int(match.group(1))
+
+            if "month" in r:
+                days = num * 30
+            elif "week" in r:
+                days = num * 7
+            elif "day" in r:
+                days = num
+            elif "hour" in r:
+                days = num / 24
+            else:
+                continue
+
+            remind_time = t["due"] - datetime.timedelta(days=days)
+
+            # 🔥 now使い回し
+            if remind_time <= now:
+                continue
 
             if r not in t.get("notified", []):
                 remaining.append(label_to_text(r))
