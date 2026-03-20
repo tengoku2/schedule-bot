@@ -373,28 +373,38 @@ async def reminder_loop():
 
         reminder_settings = [r for r in reminder_settings if isinstance(r, str)]
 
+        import re
+
         for label in reminder_settings:
+            match = re.match(r"(\d+)", label)
+            if not match:
+                continue
+
+            num = int(match.group(1))
+
+            if "month" in label:
+                days = num * 30
+            elif "week" in label:
+                days = num * 7
+            elif "day" in label:
+                days = num
+            elif "hour" in label:
+                days = num / 24
+            else:
+                continue
 
             if label in notified:
                 continue
 
-            if "month" in label:
-                days = int(label.replace("month", "")) * 30
-            elif "week" in label:
-                days = int(label.replace("week", "")) * 7
-            elif "day" in label:
-                days = int(label.replace("day", ""))
-            elif "hour" in label:
-                days = int(label.replace("hour", "")) / 24
-            else:
-                continue
-
             remind_time = t["due"] - datetime.timedelta(days=days)
 
+            # 🔥 これ超重要
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
-                    await channel.send(f"⏰ {label_to_text(label)}リマインド: {t['task']}")
+                    await channel.send(
+                        f"⏰ {label_to_text(label)}リマインド: {t['task']}"
+                    )
 
                 notified.append(label)
 
