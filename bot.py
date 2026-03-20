@@ -182,7 +182,7 @@ def insert_task(task_name, due, channel_id, user_id, reminders):
         user_id,
         json.dumps([]),
         json.dumps([]),
-        json.dumps([reminders]),
+        json.dumps(reminders),  # ←ここ修正🔥
         json.dumps([]),
         False,
         False,
@@ -296,11 +296,14 @@ async def list_tasks(interaction: discord.Interaction):
         msg += f"{i}. {t['task']}\n"
         msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
 
-        remaining = [
-            label_to_text(r)
-            for r in t.get("reminders", [])
-            if r not in t.get("notified", [])
-        ]
+        remaining = []
+
+        for r in t.get("reminders", []):
+            if isinstance(r, list):
+                r = r[0]  # ← ["1day",1] → "1day"
+
+            if r not in t.get("notified", []):
+                remaining.append(label_to_text(r))
 
         if remaining:
             msg += "🔔 " + ", ".join(remaining) + "\n"
