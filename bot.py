@@ -50,7 +50,7 @@ def parse_date(date_str):
     try:
         return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except:
-        pass  # ←ここ重要🔥
+        pass
 
     # 数字（3桁 or 4桁）
     if date_str.isdigit():
@@ -294,18 +294,14 @@ async def add(
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
-# -----------------------
-# /list
-# -----------------------
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
     await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
 
-    # 🔥 1回だけ取得
-    now = datetime.datetime.now()
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
 
-    # DB更新
     await asyncio.to_thread(load_tasks)
 
     if not tasks_list:
@@ -315,8 +311,14 @@ async def list_tasks(interaction: discord.Interaction):
     msg = "📋 タスク一覧\n"
 
     for i, t in enumerate(tasks_list, 1):
+        due = t["due"]
+
+        # 🔥 タイムゾーン補正
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=JST)
+
         msg += f"{i}. {t['task']}\n"
-        msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
+        msg += f"📅 {due.strftime('%m/%d %H:%M')}\n"
 
         remaining = []
 
@@ -342,9 +344,9 @@ async def list_tasks(interaction: discord.Interaction):
             else:
                 continue
 
-            remind_time = t["due"] - datetime.timedelta(days=days)
+            remind_time = due - datetime.timedelta(days=days)
 
-            # 🔥 now使い回し
+            # 🔥 JSTで比較
             if remind_time <= now:
                 continue
 
