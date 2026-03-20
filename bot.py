@@ -7,6 +7,7 @@ import asyncio
 import mysql.connector
 import threading
 from flask import Flask
+from waitress import serve
 
 # -----------------------
 # Flask（Koyeb用）
@@ -19,7 +20,7 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+    serve(app, host="0.0.0.0", port=port)
 
 # -----------------------
 # DB接続
