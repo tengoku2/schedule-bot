@@ -238,18 +238,17 @@ async def add(
         await interaction.edit_original_response(content="❌ 日時形式エラー\n例: 320 21 / 3/20 930")
         return
 
-        # リマインド設定
+    # 🔥 リマインド設定（ここは try の外に出す）
     try:
         if reminders:
             reminder_data = parse_reminders(reminders)
-            reminder_labels = [r[0] for r in reminder_data]
         else:
-            reminder_labels = [r[0] for r in DEFAULT_REMINDERS]
+            reminder_data = DEFAULT_REMINDERS
     except:
         await interaction.edit_original_response(content="❌ リマインド形式エラー（例: 1d,2h）")
         return
-    
-    # 🔥 ここ追加（超重要）
+
+    # 🔥 フィルタ（未来だけ）
     filtered = []
     for label, days in reminder_data:
         if due - datetime.timedelta(days=days) > now:
