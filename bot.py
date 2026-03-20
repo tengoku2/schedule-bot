@@ -213,20 +213,21 @@ async def add(
     task_name: str,
     date_str: str = None,
     time_str: str = None,
-    reminders: str = None  # ←追加
+    reminders: str = None
 ):
 
     print("🔥 add開始")
 
-    await interaction.response.defer(ephemeral=True)
+    # 🔥 deferやめる
+    await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
-    print("🔥 defer完了")
-
-    now = datetime.datetime.now()
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
 
     try:
         if not date_str and not time_str:
-            due = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow = now.date() + datetime.timedelta(days=1)
+            due = datetime.datetime.combine(tomorrow, datetime.time(0, 0))
 
         elif not date_str:
             t = parse_time(time_str)
@@ -250,29 +251,25 @@ async def add(
             t = parse_time(time_str)
             due = datetime.datetime.combine(d, t)
 
-    except Exception:
-        await interaction.edit_original_response(content="❌ 日時形式エラー\n例: 320 21 / 3/20 930")
+    except:
+        await interaction.edit_original_response(content="❌ 日時形式エラー")
         return
 
-    # 🔥 リマインド設定（ここは try の外に出す）
+    # リマインド
     try:
         if reminders:
             reminder_data = parse_reminders(reminders)
         else:
             reminder_data = DEFAULT_REMINDERS
     except:
-        await interaction.edit_original_response(content="❌ リマインド形式エラー（例: 1d,2h）")
+        await interaction.edit_original_response(content="❌ リマインド形式エラー")
         return
 
-    # 🔥 フィルタ（未来だけ）
     filtered = []
     for label, days in reminder_data:
         remind_time = due - datetime.timedelta(days=days)
-
         if remind_time > now:
             filtered.append(label)
-
-    reminder_labels = filtered
 
     try:
         await asyncio.to_thread(
@@ -281,7 +278,7 @@ async def add(
             due,
             interaction.channel.id,
             interaction.user.id,
-            reminder_labels  # ←これ追加
+            filtered
         )
     except Exception as e:
         print(e)
@@ -294,6 +291,9 @@ async def add(
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
+# -----------------------
+# /list
+# -----------------------
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
