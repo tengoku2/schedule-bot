@@ -46,6 +46,58 @@ def get_cursor():
 # -----------------------
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
+# 日付パース
+def parse_date(date_str):
+    now = datetime.datetime.now(JST)
+
+    # YYYY-MM-DD
+    try:
+        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except:
+        pass
+
+    # MMDD
+    if date_str.isdigit() and len(date_str) == 4:
+        month = int(date_str[:2])
+        day = int(date_str[2:])
+        year = now.year
+        return datetime.date(year, month, day)
+
+    # M/D
+    if "/" in date_str:
+        parts = date_str.split("/")
+        month = int(parts[0])
+        day = int(parts[1])
+        year = now.year
+        return datetime.date(year, month, day)
+    
+    date = datetime.date(year, month, day)
+
+    # 過去日なら来年にする
+    if date < now.date():
+        date = datetime.date(year + 1, month, day)
+
+    return date
+
+    raise ValueError("日付形式エラー")
+
+# 時間パース
+def parse_time(time_str):
+    # HH:MM
+    if ":" in time_str:
+        return datetime.datetime.strptime(time_str, "%H:%M").time()
+
+    # HMM or HHMM
+    if time_str.isdigit():
+        if len(time_str) <= 2:
+            return datetime.time(int(time_str), 0)
+        elif len(time_str) in [3, 4]:
+            hour = int(time_str[:-2])
+            minute = int(time_str[-2:])
+            return datetime.time(hour, minute)
+
+    raise ValueError("時間形式エラー")
+
 # -----------------------
 # データ
 # -----------------------
@@ -116,24 +168,21 @@ def insert_task(task_name, due, channel_id, user_id):
 async def add(
     interaction: discord.Interaction,
     task_name: str,
-    due_date: str,   # 例: 2026-03-25
-    due_time: str    # 例: 18:00
+    date_str: str,
+    time_str: str
 ):
-
-    print("🔥 /add 呼ばれた")
 
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     try:
-        # 👇 日時パース
-        due = datetime.datetime.strptime(
-            f"{due_date} {due_time}",
-            "%Y-%m-%d %H:%M"
-        ).replace(tzinfo=JST)
+        d = parse_date(date_str)
+        t = parse_time(time_str)
+
+        due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
 
     except Exception:
         await interaction.edit_original_response(
-            content="❌ 日時形式エラー\n例: 2026-03-25 18:00"
+            content="❌ 日時形式エラー\n例: 0325 1800 / 3/25 9:30"
         )
         return
 
@@ -145,10 +194,9 @@ async def add(
             interaction.channel.id,
             interaction.user.id
         )
-        print("✅ DB OK")
 
     except Exception as e:
-        print("❌ DBエラー:", e)
+        print(e)
         await interaction.edit_original_response(content="❌ DBエラー")
         return
 
