@@ -118,11 +118,7 @@ def load_tasks():
     for t in rows:
         due = t["due"]
 
-        # 👇 これ超重要（UTCとして扱う）
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=datetime.timezone.utc)
-
-        due = due.astimezone(JST)
+        due = due.replace(tzinfo=JST)
 
         new_list.append({
             "id": t["id"],
