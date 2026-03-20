@@ -21,8 +21,6 @@ def run_web():
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=run_web, daemon=True).start()
-
 # -----------------------
 # DB接続
 # -----------------------
@@ -427,5 +425,14 @@ async def on_ready():
 # -----------------------
 # 実行
 # -----------------------
-if __name__ == "__main__":
+def start_bot():
     bot.run(os.environ.get("TOKEN"))
+
+if __name__ == "__main__":
+    import threading
+
+    # 🔥 Botを裏で起動
+    threading.Thread(target=start_bot, daemon=True).start()
+
+    # 🔥 Flaskをメインで起動（これが重要）
+    run_web()
