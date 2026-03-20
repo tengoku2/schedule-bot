@@ -116,10 +116,18 @@ def load_tasks():
 
     new_list = []
     for t in rows:
+        due = t["due"]
+
+        # 👇 これ超重要（UTCとして扱う）
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=datetime.timezone.utc)
+
+        due = due.astimezone(JST)
+
         new_list.append({
             "id": t["id"],
             "task": t["task"],
-            "due": t["due"].astimezone(JST),
+            "due": due,
             "channel_id": t["channel_id"],
             "owner_id": t["owner_id"],
             "visible_to": json.loads(t["visible_to"] or "[]"),
@@ -175,6 +183,9 @@ async def add(
     time_str: str = None
 ):
 
+    def to_utc_naive(dt):
+        return dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     now = datetime.datetime.now(JST)
@@ -185,8 +196,10 @@ async def add(
         # -------------------
         if not date_str and not time_str:
             due = (now + datetime.timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
+            hour=0, minute=0, second=0, microsecond=0
             )
+            due = due.replace(tzinfo=JST)
+            due = to_utc_naive(due)
 
         # -------------------
         # dateなし
@@ -201,6 +214,8 @@ async def add(
             else:
                 due = today_due + datetime.timedelta(days=1)
 
+            due = to_utc_naive(due)
+
         # -------------------
         # timeなし
         # -------------------
@@ -212,6 +227,8 @@ async def add(
             else:
                 due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
 
+            due = to_utc_naive(due)
+
         # -------------------
         # 両方あり
         # -------------------
@@ -219,6 +236,7 @@ async def add(
             d = parse_date(date_str)
             t = parse_time(time_str)
             due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
+            due = to_utc_naive(due)
 
     except Exception:
         await interaction.edit_original_response(
@@ -240,10 +258,12 @@ async def add(
         await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    await interaction.edit_original_response(
-        content=f"✅ 追加: {task_name}\n📅 {due.strftime('%m/%d %H:%M')}"
-    )
+    jst_due = due.replace(tzinfo=datetime.timezone.utc).astimezone(JST)
 
+    await interaction.edit_original_response(
+        content=f"✅ 追加: {task_name}\n📅 {jst_due.strftime('%m/%d %H:%M')}"
+    )
+    
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
@@ -297,7 +317,12 @@ async def reminder_loop():
         if t["status"] != "todo":
             continue
 
-        if t["due"] < now:
+        due = t["due"]
+
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=JST)
+
+        if due < now:
             continue
 
         notified = t.get("notified", [])
@@ -306,7 +331,7 @@ async def reminder_loop():
             if label in notified:
                 continue
 
-            remind_time = t["due"] - datetime.timedelta(days=days)
+            remind_time = due - datetime.timedelta(days=days)
 
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(t["channel_id"])
@@ -340,7 +365,8 @@ async def on_ready():
     await tree.sync()
     print("✅ コマンド同期完了")
 
-    reminder_loop.start()
+    if not reminder_loop.is_running():
+        reminder_loop.start()
     print("🔔 リマインド開始")
 
 # -----------------------
