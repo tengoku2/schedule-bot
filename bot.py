@@ -444,9 +444,26 @@ async def reminder_loop():
 
         print("DUE:", due)
 
-        if due < now:
-            print("SKIP: 過去タスク")
-            continue
+        # 🔥 期限通知（ここ追加）
+        notified = t.get("notified", [])
+
+        if "due" not in notified:
+            if now >= due:
+                print("🔥 期限通知発火")
+
+                channel = bot.get_channel(t["channel_id"])
+                if channel:
+                    await channel.send(f"⏰ 期限です: {t['task']}")
+
+                notified.append("due")
+
+                db, cursor = get_cursor()
+                cursor.execute(
+                    "UPDATE tasks SET notified=%s WHERE id=%s",
+                    (json.dumps(notified), t["id"])
+                )
+                db.commit()
+                db.close()
 
         notified = t.get("notified", [])
         reminder_settings = t.get("reminders", [])
