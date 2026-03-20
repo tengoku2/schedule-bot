@@ -248,6 +248,14 @@ async def add(
     except:
         await interaction.edit_original_response(content="❌ リマインド形式エラー（例: 1d,2h）")
         return
+    
+    # 🔥 ここ追加（超重要）
+    filtered = []
+    for label, days in reminder_data:
+        if due - datetime.timedelta(days=days) > now:
+            filtered.append(label)
+
+    reminder_labels = filtered
 
     try:
         await asyncio.to_thread(
