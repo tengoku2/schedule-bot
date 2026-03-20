@@ -298,25 +298,16 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    # 🔥 最速でこれ（他の処理より前）
-    await interaction.response.defer(ephemeral=True)
+    # 🔥 deferやめる
+    await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
 
-    # 🔥 少しだけ譲る（これが効く）
-    await asyncio.sleep(0)
-
-    # 🔥 そのあとDB
+    # 🔥 その後処理
     await asyncio.to_thread(load_tasks)
 
-    # -----------------------
-    # タスクなし
-    # -----------------------
     if not tasks_list:
         await interaction.edit_original_response(content="📭 タスクなし")
         return
 
-    # -----------------------
-    # 表示生成
-    # -----------------------
     msg = "📋 タスク一覧\n"
 
     for i, t in enumerate(tasks_list, 1):
@@ -326,7 +317,6 @@ async def list_tasks(interaction: discord.Interaction):
         remaining = []
 
         for r in t.get("reminders", []):
-            # 念のため変換
             if isinstance(r, list):
                 r = r[0]
 
@@ -338,7 +328,6 @@ async def list_tasks(interaction: discord.Interaction):
 
         msg += "\n"
 
-    # 🔥 最後はこれだけ
     await interaction.edit_original_response(content=msg)
 # -----------------------
 # リマインド
