@@ -45,11 +45,13 @@ def get_cursor():
 def parse_date(date_str):
     now = datetime.datetime.now()
 
+    # YYYY-MM-DD
     try:
         return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except:
-        pass
+        pass  # ←ここ重要🔥
 
+    # 数字（3桁 or 4桁）
     if date_str.isdigit():
         if len(date_str) in [3, 4]:
             if len(date_str) == 3:
@@ -58,6 +60,7 @@ def parse_date(date_str):
             else:
                 month = int(date_str[:2])
                 day = int(date_str[2:])
+
             year = now.year
             d = datetime.date(year, month, day)
 
@@ -66,16 +69,21 @@ def parse_date(date_str):
 
             return d
 
+    # M/D
     if "/" in date_str:
-        m, d = map(int, date_str.split("/"))
-        year = now.year
-        d = datetime.date(year, m, d)
+        try:
+            m, d = map(int, date_str.split("/"))
+            year = now.year
+            d = datetime.date(year, m, d)
 
-        if d < now.date():
-            d = datetime.date(year + 1, m, d)
+            if d < now.date():
+                d = datetime.date(year + 1, m, d)
 
-        return d
+            return d
+        except:
+            pass
 
+    # 最後にエラー
     raise ValueError("日付形式エラー")
 
 # -----------------------
@@ -285,8 +293,9 @@ async def list_tasks(interaction: discord.Interaction):
     try:
         await interaction.response.defer(ephemeral=True)
         responded = True
-    except:
-        pass  # ←ここ変える
+    except Exception as e:
+        print("エラー内容:", e)
+        await interaction.edit_original_response(content="❌ エラー発生")
 
     if not tasks_list:
         if responded:
