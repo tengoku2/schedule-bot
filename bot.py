@@ -292,22 +292,22 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    responded = False
+    # 🔥 まず即defer（これ必須）
+    await interaction.response.defer(ephemeral=True)
 
-    try:
-        await interaction.response.defer(ephemeral=True)
-        responded = True
-    except Exception as e:
-        print("エラー内容:", e)
-        await interaction.edit_original_response(content="❌ エラー発生")
+    # 🔥 毎回DBから最新取得（これが今回の本質）
+    await asyncio.to_thread(load_tasks)
 
+    # -----------------------
+    # タスクなし
+    # -----------------------
     if not tasks_list:
-        if responded:
-            await interaction.edit_original_response(content="📭 タスクなし")
-        else:
-            await interaction.followup.send("📭 タスクなし", ephemeral=True)
+        await interaction.edit_original_response(content="📭 タスクなし")
         return
 
+    # -----------------------
+    # 表示生成
+    # -----------------------
     msg = "📋 タスク一覧\n"
 
     for i, t in enumerate(tasks_list, 1):
@@ -317,8 +317,9 @@ async def list_tasks(interaction: discord.Interaction):
         remaining = []
 
         for r in t.get("reminders", []):
+            # 念のため変換
             if isinstance(r, list):
-                r = r[0]  # ← ["1day",1] → "1day"
+                r = r[0]
 
             if r not in t.get("notified", []):
                 remaining.append(label_to_text(r))
@@ -328,10 +329,8 @@ async def list_tasks(interaction: discord.Interaction):
 
         msg += "\n"
 
-    if responded:
-        await interaction.edit_original_response(content=msg)
-    else:
-        await interaction.followup.send(msg, ephemeral=True)
+    # 🔥 最後はこれだけ
+    await interaction.edit_original_response(content=msg)
 # -----------------------
 # リマインド
 # -----------------------
