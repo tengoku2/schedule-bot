@@ -116,9 +116,7 @@ def load_tasks():
 
     new_list = []
     for t in rows:
-        due = t["due"]
-
-        due = due.replace(tzinfo=JST)
+        due = t["due"].replace(tzinfo=JST)
 
         new_list.append({
             "id": t["id"],
