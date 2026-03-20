@@ -144,7 +144,12 @@ def load_tasks():
     print("🔄 load_tasks開始")
 
     db, cursor = get_cursor()
-    cursor.execute("SELECT * FROM tasks")
+
+    cursor.execute("""
+        SELECT id, task, due, reminders, notified, channel_id, owner_id, visible_to, status 
+        FROM tasks
+    """)
+
     rows = cursor.fetchall()
 
     new_list = []
@@ -292,10 +297,13 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    # 🔥 まず即defer（これ必須）
+    # 🔥 最速でこれ（他の処理より前）
     await interaction.response.defer(ephemeral=True)
 
-    # 🔥 毎回DBから最新取得（これが今回の本質）
+    # 🔥 少しだけ譲る（これが効く）
+    await asyncio.sleep(0)
+
+    # 🔥 そのあとDB
     await asyncio.to_thread(load_tasks)
 
     # -----------------------
