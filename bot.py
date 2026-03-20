@@ -275,13 +275,19 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
+    responded = False
+
     try:
         await interaction.response.defer(ephemeral=True)
+        responded = True
     except:
-        return  # ←これ超重要
+        pass  # ←ここ変える
 
     if not tasks_list:
-        await interaction.edit_original_response(content="📭 タスクなし")
+        if responded:
+            await interaction.edit_original_response(content="📭 タスクなし")
+        else:
+            await interaction.followup.send("📭 タスクなし", ephemeral=True)
         return
 
     msg = "📋 タスク一覧\n"
@@ -301,7 +307,10 @@ async def list_tasks(interaction: discord.Interaction):
 
         msg += "\n"
 
-    await interaction.edit_original_response(content=msg)
+    if responded:
+        await interaction.edit_original_response(content=msg)
+    else:
+        await interaction.followup.send(msg, ephemeral=True)
 # -----------------------
 # リマインド
 # -----------------------
