@@ -56,38 +56,41 @@ def parse_date(date_str):
     except:
         pass
 
-    # MMDD
-    if date_str.isdigit() and len(date_str) == 4:
-        month = int(date_str[:2])
-        day = int(date_str[2:])
-        year = now.year
-        return datetime.date(year, month, day)
+    # 数字（3桁 or 4桁）
+    if date_str.isdigit():
+        if len(date_str) in [3, 4]:
+            if len(date_str) == 3:
+                month = int(date_str[0])
+                day = int(date_str[1:])
+            else:
+                month = int(date_str[:2])
+                day = int(date_str[2:])
+            year = now.year
+            d = datetime.date(year, month, day)
+
+            if d < now.date():
+                d = datetime.date(year + 1, month, day)
+
+            return d
 
     # M/D
     if "/" in date_str:
-        parts = date_str.split("/")
-        month = int(parts[0])
-        day = int(parts[1])
+        m, d = map(int, date_str.split("/"))
         year = now.year
-        return datetime.date(year, month, day)
-    
-    date = datetime.date(year, month, day)
+        d = datetime.date(year, m, d)
 
-    # 過去日なら来年にする
-    if date < now.date():
-        date = datetime.date(year + 1, month, day)
+        if d < now.date():
+            d = datetime.date(year + 1, m, d)
 
-    return date
+        return d
 
     raise ValueError("日付形式エラー")
 
 # 時間パース
 def parse_time(time_str):
-    # HH:MM
     if ":" in time_str:
         return datetime.datetime.strptime(time_str, "%H:%M").time()
 
-    # HMM or HHMM
     if time_str.isdigit():
         if len(time_str) <= 2:
             return datetime.time(int(time_str), 0)
@@ -162,27 +165,64 @@ def insert_task(task_name, due, channel_id, user_id):
     db.close()
 
 # -----------------------
-# /add（完全安定版）
+# /add
 # -----------------------
 @tree.command(name="add", description="タスク追加")
 async def add(
     interaction: discord.Interaction,
     task_name: str,
-    date_str: str,
-    time_str: str
+    date_str: str = None,
+    time_str: str = None
 ):
 
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
-    try:
-        d = parse_date(date_str)
-        t = parse_time(time_str)
+    now = datetime.datetime.now(JST)
 
-        due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
+    try:
+        # -------------------
+        # 両方なし
+        # -------------------
+        if not date_str and not time_str:
+            due = (now + datetime.timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+        # -------------------
+        # dateなし
+        # -------------------
+        elif not date_str:
+            t = parse_time(time_str)
+
+            today_due = datetime.datetime.combine(now.date(), t).replace(tzinfo=JST)
+
+            if today_due > now:
+                due = today_due
+            else:
+                due = today_due + datetime.timedelta(days=1)
+
+        # -------------------
+        # timeなし
+        # -------------------
+        elif not time_str:
+            d = parse_date(date_str)
+
+            if d == now.date():
+                due = datetime.datetime.combine(d, datetime.time(23, 59)).replace(tzinfo=JST)
+            else:
+                due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
+
+        # -------------------
+        # 両方あり
+        # -------------------
+        else:
+            d = parse_date(date_str)
+            t = parse_time(time_str)
+            due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
 
     except Exception:
         await interaction.edit_original_response(
-            content="❌ 日時形式エラー\n例: 0325 1800 / 3/25 9:30"
+            content="❌ 日時形式エラー\n例: 320 21 / 3/20 930"
         )
         return
 
