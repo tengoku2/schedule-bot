@@ -225,31 +225,35 @@ async def add(
     now = datetime.datetime.now(JST)
 
     try:
+        # 両方なし
         if not date_str and not time_str:
             tomorrow = now.date() + datetime.timedelta(days=1)
-            due = datetime.datetime.combine(tomorrow, datetime.time(0, 0))
+            due = datetime.datetime.combine(tomorrow, datetime.time(0, 0)).replace(tzinfo=JST)
 
+        # dateなし
         elif not date_str:
             t = parse_time(time_str)
-            today_due = datetime.datetime.combine(now.date(), t)
+            today_due = datetime.datetime.combine(now.date(), t).replace(tzinfo=JST)
 
             if today_due > now:
                 due = today_due
             else:
                 due = today_due + datetime.timedelta(days=1)
 
+        # timeなし
         elif not time_str:
             d = parse_date(date_str)
 
             if d == now.date():
-                due = datetime.datetime.combine(d, datetime.time(23, 59))
+                due = datetime.datetime.combine(d, datetime.time(23, 59)).replace(tzinfo=JST)
             else:
-                due = datetime.datetime.combine(d, datetime.time(0, 0))
+                due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
 
+        # 両方あり
         else:
             d = parse_date(date_str)
             t = parse_time(time_str)
-            due = datetime.datetime.combine(d, t)
+            due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
 
     except:
         await interaction.edit_original_response(content="❌ 日時形式エラー")
