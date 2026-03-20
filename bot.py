@@ -455,8 +455,8 @@ def start_bot():
 if __name__ == "__main__":
     import threading
 
-    # 🔥 Botを裏で起動
-    threading.Thread(target=start_bot, daemon=True).start()
+    # 🔥 Flaskを裏で起動
+    threading.Thread(target=run_web, daemon=True).start()
 
-    # 🔥 Flaskをメインで起動（これが重要）
-    run_web()
+    # 🔥 Botをメインで起動（超重要）
+    bot.run(os.environ.get("TOKEN"))
