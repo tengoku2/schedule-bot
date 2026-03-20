@@ -212,8 +212,7 @@ async def add(
 
     print("🔥 add開始")
 
-    if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
 
     print("🔥 defer完了")
 
