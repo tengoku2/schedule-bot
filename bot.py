@@ -336,6 +336,11 @@ async def reminder_loop():
 
         reminder_settings = t.get("reminders", [])
 
+        if not isinstance(reminder_settings, list):
+            continue
+
+        reminder_settings = [r for r in reminder_settings if isinstance(r, str)]
+
         for label in reminder_settings:
 
             if label in notified:
