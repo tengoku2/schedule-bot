@@ -218,8 +218,14 @@ async def add(
 
     print("🔥 add開始")
 
-    # 🔥 deferやめる
-    await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
+    # deferやめる
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
+        else:
+            await interaction.followup.send("⏳ 追加中...", ephemeral=True)
+    except:
+        pass  # ← ここ重要（握りつぶす）
 
     JST = datetime.timezone(datetime.timedelta(hours=9))
     now = datetime.datetime.now(JST)
@@ -416,23 +422,23 @@ def label_to_text(label):
 
 @tasks.loop(seconds=30)
 async def reminder_loop():
-    now = datetime.datetime.now()
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
 
     for t in tasks_list:
         if t["status"] != "todo":
             continue
 
-        if t["due"] < now:
+        due = t["due"]
+
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=JST)
+
+        if due < now:
             continue
 
         notified = t.get("notified", [])
-
         reminder_settings = t.get("reminders", [])
-
-        if not isinstance(reminder_settings, list):
-            continue
-
-        reminder_settings = [r for r in reminder_settings if isinstance(r, str)]
 
         import re
 
@@ -457,9 +463,8 @@ async def reminder_loop():
             if label in notified:
                 continue
 
-            remind_time = t["due"] - datetime.timedelta(days=days)
+            remind_time = due - datetime.timedelta(days=days)
 
-            # 🔥 これ超重要
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
