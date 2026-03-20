@@ -267,7 +267,9 @@ async def add(
     # 🔥 フィルタ（未来だけ）
     filtered = []
     for label, days in reminder_data:
-        if due - datetime.timedelta(days=days) > now:
+        remind_time = due - datetime.timedelta(days=days)
+
+        if remind_time > now:
             filtered.append(label)
 
     reminder_labels = filtered
