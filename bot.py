@@ -42,21 +42,16 @@ def get_cursor():
     return db, db.cursor(dictionary=True)
 
 # -----------------------
-# JST
-# -----------------------
-JST = datetime.timezone(datetime.timedelta(hours=9))
-
 # 日付パース
+# -----------------------
 def parse_date(date_str):
-    now = datetime.datetime.now(JST)
+    now = datetime.datetime.now()
 
-    # YYYY-MM-DD
     try:
         return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except:
         pass
 
-    # 数字（3桁 or 4桁）
     if date_str.isdigit():
         if len(date_str) in [3, 4]:
             if len(date_str) == 3:
@@ -73,7 +68,6 @@ def parse_date(date_str):
 
             return d
 
-    # M/D
     if "/" in date_str:
         m, d = map(int, date_str.split("/"))
         year = now.year
@@ -86,7 +80,9 @@ def parse_date(date_str):
 
     raise ValueError("日付形式エラー")
 
+# -----------------------
 # 時間パース
+# -----------------------
 def parse_time(time_str):
     if ":" in time_str:
         return datetime.datetime.strptime(time_str, "%H:%M").time()
@@ -116,12 +112,10 @@ def load_tasks():
 
     new_list = []
     for t in rows:
-        due = t["due"].replace(tzinfo=JST)
-
         new_list.append({
             "id": t["id"],
             "task": t["task"],
-            "due": due,
+            "due": t["due"],  # ← そのまま使う
             "channel_id": t["channel_id"],
             "owner_id": t["owner_id"],
             "visible_to": json.loads(t["visible_to"] or "[]"),
@@ -170,85 +164,53 @@ def insert_task(task_name, due, channel_id, user_id):
 # /add
 # -----------------------
 @tree.command(name="add", description="タスク追加")
-async def add(
-    interaction: discord.Interaction,
-    task_name: str,
-    date_str: str = None,
-    time_str: str = None
-):
+async def add(interaction: discord.Interaction, task_name: str, date_str: str = None, time_str: str = None):
 
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
-    now = datetime.datetime.now(JST)
+    now = datetime.datetime.now()
 
     try:
-        # -------------------
-        # 両方なし
-        # -------------------
         if not date_str and not time_str:
-            due = (now + datetime.timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-            )
-            due = due.replace(tzinfo=JST)
+            due = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # -------------------
-        # dateなし
-        # -------------------
         elif not date_str:
             t = parse_time(time_str)
-
-            today_due = datetime.datetime.combine(now.date(), t).replace(tzinfo=JST)
+            today_due = datetime.datetime.combine(now.date(), t)
 
             if today_due > now:
                 due = today_due
             else:
                 due = today_due + datetime.timedelta(days=1)
 
-        # -------------------
-        # timeなし
-        # -------------------
         elif not time_str:
             d = parse_date(date_str)
 
             if d == now.date():
-                due = datetime.datetime.combine(d, datetime.time(23, 59)).replace(tzinfo=JST)
+                due = datetime.datetime.combine(d, datetime.time(23, 59))
             else:
-                due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
+                due = datetime.datetime.combine(d, datetime.time(0, 0))
 
-        # -------------------
-        # 両方あり
-        # -------------------
         else:
             d = parse_date(date_str)
             t = parse_time(time_str)
-            due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
+            due = datetime.datetime.combine(d, t)
 
     except Exception:
-        await interaction.edit_original_response(
-            content="❌ 日時形式エラー\n例: 320 21 / 3/20 930"
-        )
+        await interaction.edit_original_response(content="❌ 日時形式エラー\n例: 320 21 / 3/20 930")
         return
 
     try:
-        await asyncio.to_thread(
-            insert_task,
-            task_name,
-            due,
-            interaction.channel.id,
-            interaction.user.id
-        )
-
+        await asyncio.to_thread(insert_task, task_name, due, interaction.channel.id, interaction.user.id)
     except Exception as e:
         print(e)
         await interaction.edit_original_response(content="❌ DBエラー")
         return
 
-    jst_due = due.replace(tzinfo=datetime.timezone.utc).astimezone(JST)
-
     await interaction.edit_original_response(
-        content=f"✅ 追加: {task_name}\n📅 {jst_due.strftime('%m/%d %H:%M')}"
+        content=f"✅ 追加: {task_name}\n📅 {due.strftime('%m/%d %H:%M')}"
     )
-    
+
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
@@ -271,7 +233,7 @@ async def list_tasks(interaction: discord.Interaction):
     await interaction.edit_original_response(content=msg)
 
 # -----------------------
-# リマインド機能
+# リマインド
 # -----------------------
 from discord.ext import tasks
 
@@ -296,18 +258,13 @@ def label_to_text(label):
 
 @tasks.loop(seconds=30)
 async def reminder_loop():
-    now = datetime.datetime.now(JST)
+    now = datetime.datetime.now()
 
     for t in tasks_list:
         if t["status"] != "todo":
             continue
 
-        due = t["due"]
-
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=JST)
-
-        if due < now:
+        if t["due"] < now:
             continue
 
         notified = t.get("notified", [])
@@ -316,14 +273,12 @@ async def reminder_loop():
             if label in notified:
                 continue
 
-            remind_time = due - datetime.timedelta(days=days)
+            remind_time = t["due"] - datetime.timedelta(days=days)
 
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
-                    await channel.send(
-                        f"⏰ {label_to_text(label)}リマインド: {t['task']}"
-                    )
+                    await channel.send(f"⏰ {label_to_text(label)}リマインド: {t['task']}")
 
                 notified.append(label)
 
@@ -342,10 +297,7 @@ async def reminder_loop():
 async def on_ready():
     print("🚀 起動完了")
 
-    try:
-        await asyncio.to_thread(load_tasks)
-    except Exception as e:
-        print("❌ load_tasks失敗:", e)
+    await asyncio.to_thread(load_tasks)
 
     await tree.sync()
     print("✅ コマンド同期完了")
