@@ -363,14 +363,31 @@ REMINDERS = [
 ]
 
 def label_to_text(label):
+    import re
+
+    # 🔥 先に複数形を処理
+    label = label.replace("months", "month")
+    label = label.replace("weeks", "week")
+    label = label.replace("days", "day")
+    label = label.replace("hours", "hour")
+
+    # 🔥 数字だけ抜く
+    match = re.match(r"(\d+)", label)
+    if not match:
+        return label
+
+    num = match.group(1)
+
+    # 🔥 表示
     if "month" in label:
-        return f"{label.replace('month','')}ヶ月前"
+        return f"{num}ヶ月前"
     elif "week" in label:
-        return f"{label.replace('week','')}週間前"
+        return f"{num}週間前"
     elif "day" in label:
-        return f"{label.replace('day','')}日前"
+        return f"{num}日前"
     elif "hour" in label:
-        return f"{label.replace('hour','')}時間前"
+        return f"{num}時間前"
+
     return label
 
 @tasks.loop(seconds=30)
