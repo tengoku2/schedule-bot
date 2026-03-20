@@ -177,9 +177,6 @@ async def add(
     time_str: str = None
 ):
 
-    def to_utc_naive(dt):
-        return dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
     now = datetime.datetime.now(JST)
@@ -193,7 +190,6 @@ async def add(
             hour=0, minute=0, second=0, microsecond=0
             )
             due = due.replace(tzinfo=JST)
-            due = to_utc_naive(due)
 
         # -------------------
         # dateなし
@@ -208,8 +204,6 @@ async def add(
             else:
                 due = today_due + datetime.timedelta(days=1)
 
-            due = to_utc_naive(due)
-
         # -------------------
         # timeなし
         # -------------------
@@ -221,8 +215,6 @@ async def add(
             else:
                 due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
 
-            due = to_utc_naive(due)
-
         # -------------------
         # 両方あり
         # -------------------
@@ -230,7 +222,6 @@ async def add(
             d = parse_date(date_str)
             t = parse_time(time_str)
             due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
-            due = to_utc_naive(due)
 
     except Exception:
         await interaction.edit_original_response(
