@@ -98,6 +98,37 @@ def parse_time(time_str):
     raise ValueError("時間形式エラー")
 
 # -----------------------
+# REMINDERパース
+# -----------------------
+def parse_reminders(reminder_str):
+    mapping = {
+        "m": ("month", 30),
+        "w": ("week", 7),
+        "d": ("day", 1),
+        "h": ("hour", 1/24),
+    }
+
+    result = []
+
+    for part in reminder_str.split(","):
+        part = part.strip().lower()
+
+        num = int(part[:-1])
+        unit = part[-1]
+
+        if unit not in mapping:
+            raise ValueError("単位エラー")
+
+        name, base = mapping[unit]
+
+        label = f"{num}{name}"
+        days = num * base
+
+        result.append((label, days))
+
+    return result
+
+# -----------------------
 # データ
 # -----------------------
 tasks_list = []
@@ -121,6 +152,7 @@ def load_tasks():
             "visible_to": json.loads(t["visible_to"] or "[]"),
             "status": t["status"],
             "notified": json.loads(t["notified"] or "[]"),
+            "reminders": json.loads(t["reminders"] or "[]"),
         })
 
     tasks_list = new_list
@@ -136,7 +168,7 @@ tree = app_commands.CommandTree(bot)
 # -----------------------
 # DB INSERT
 # -----------------------
-def insert_task(task_name, due, channel_id, user_id):
+def insert_task(task_name, due, channel_id, user_id, reminders):
     db, cursor = get_cursor()
 
     cursor.execute("""
@@ -150,7 +182,7 @@ def insert_task(task_name, due, channel_id, user_id):
         user_id,
         json.dumps([]),
         json.dumps([]),
-        json.dumps([0]),
+        json.dumps([reminders]),
         json.dumps([]),
         False,
         False,
@@ -164,7 +196,13 @@ def insert_task(task_name, due, channel_id, user_id):
 # /add
 # -----------------------
 @tree.command(name="add", description="タスク追加")
-async def add(interaction: discord.Interaction, task_name: str, date_str: str = None, time_str: str = None):
+async def add(
+    interaction: discord.Interaction,
+    task_name: str,
+    date_str: str = None,
+    time_str: str = None,
+    reminders: str = None  # ←追加
+):
 
     await interaction.response.send_message("⏳ 追加中...", ephemeral=True)
 
@@ -200,8 +238,26 @@ async def add(interaction: discord.Interaction, task_name: str, date_str: str = 
         await interaction.edit_original_response(content="❌ 日時形式エラー\n例: 320 21 / 3/20 930")
         return
 
+        # リマインド設定
     try:
-        await asyncio.to_thread(insert_task, task_name, due, interaction.channel.id, interaction.user.id)
+        if reminders:
+            reminder_data = parse_reminders(reminders)
+            reminder_labels = [r[0] for r in reminder_data]
+        else:
+            reminder_labels = [r[0] for r in DEFAULT_REMINDERS]
+    except:
+        await interaction.edit_original_response(content="❌ リマインド形式エラー（例: 1d,2h）")
+        return
+
+    try:
+        await asyncio.to_thread(
+            insert_task,
+            task_name,
+            due,
+            interaction.channel.id,
+            interaction.user.id,
+            reminder_labels  # ←これ追加
+        )
     except Exception as e:
         print(e)
         await interaction.edit_original_response(content="❌ DBエラー")
@@ -237,6 +293,15 @@ async def list_tasks(interaction: discord.Interaction):
 # -----------------------
 from discord.ext import tasks
 
+DEFAULT_REMINDERS = [
+    ("1month", 30),
+    ("2weeks", 14),
+    ("1week", 7),
+    ("3days", 3),
+    ("1day", 1),
+    ("3hours", 3/24),
+]
+
 REMINDERS = [
     ("1month", 30),
     ("2weeks", 14),
@@ -269,8 +334,22 @@ async def reminder_loop():
 
         notified = t.get("notified", [])
 
-        for label, days in REMINDERS:
+        reminder_settings = t.get("reminders", [])
+
+        for label in reminder_settings:
+
             if label in notified:
+                continue
+
+            if "month" in label:
+                days = int(label.replace("month", "")) * 30
+            elif "week" in label:
+                days = int(label.replace("week", "")) * 7
+            elif "day" in label:
+                days = int(label.replace("day", ""))
+            elif "hour" in label:
+                days = int(label.replace("hour", "")) / 24
+            else:
                 continue
 
             remind_time = t["due"] - datetime.timedelta(days=days)
