@@ -210,7 +210,12 @@ async def add(
     reminders: str = None  # ←追加
 ):
 
-    await interaction.response.defer(ephemeral=True)
+    print("🔥 add開始")
+
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+
+    print("🔥 defer完了")
 
     now = datetime.datetime.now()
 
