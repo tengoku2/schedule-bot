@@ -275,13 +275,17 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    await interaction.response.defer(ephemeral=True)  # ←これ重要
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except:
+        return  # ←これ超重要
 
     if not tasks_list:
         await interaction.edit_original_response(content="📭 タスクなし")
         return
 
     msg = "📋 タスク一覧\n"
+
     for i, t in enumerate(tasks_list, 1):
         msg += f"{i}. {t['task']}\n"
         msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
@@ -298,7 +302,6 @@ async def list_tasks(interaction: discord.Interaction):
         msg += "\n"
 
     await interaction.edit_original_response(content=msg)
-
 # -----------------------
 # リマインド
 # -----------------------
