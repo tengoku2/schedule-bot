@@ -282,9 +282,20 @@ async def list_tasks(interaction: discord.Interaction):
         return
 
     msg = "📋 タスク一覧\n"
-    for i, t in enumerate(tasks_list, 1):
-        msg += f"{i}. {t['task']}\n"
-        msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n\n"
+    msg += f"{i}. {t['task']}\n"
+    msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
+
+    # 🔥 ここ追加
+    remaining = [
+        label_to_text(r)
+        for r in t.get("reminders", [])
+        if r not in t.get("notified", [])
+    ]
+
+    if remaining:
+        msg += "🔔 " + ", ".join(remaining) + "\n"
+
+    msg += "\n"
 
     await interaction.edit_original_response(content=msg)
 
@@ -312,14 +323,15 @@ REMINDERS = [
 ]
 
 def label_to_text(label):
-    return {
-        "1month": "1ヶ月前",
-        "2weeks": "2週間前",
-        "1week": "1週間前",
-        "3days": "3日前",
-        "1day": "24時間前",
-        "3hours": "3時間前",
-    }.get(label, label)
+    if "month" in label:
+        return f"{label.replace('month','')}ヶ月前"
+    elif "week" in label:
+        return f"{label.replace('week','')}週間前"
+    elif "day" in label:
+        return f"{label.replace('day','')}日前"
+    elif "hour" in label:
+        return f"{label.replace('hour','')}時間前"
+    return label
 
 @tasks.loop(seconds=30)
 async def reminder_loop():
