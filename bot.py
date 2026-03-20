@@ -275,27 +275,27 @@ async def add(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(interaction: discord.Interaction):
 
-    await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)  # ←これ重要
 
     if not tasks_list:
         await interaction.edit_original_response(content="📭 タスクなし")
         return
 
     msg = "📋 タスク一覧\n"
-    msg += f"{i}. {t['task']}\n"
-    msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
+    for i, t in enumerate(tasks_list, 1):
+        msg += f"{i}. {t['task']}\n"
+        msg += f"📅 {t['due'].strftime('%m/%d %H:%M')}\n"
 
-    # 🔥 ここ追加
-    remaining = [
-        label_to_text(r)
-        for r in t.get("reminders", [])
-        if r not in t.get("notified", [])
-    ]
+        remaining = [
+            label_to_text(r)
+            for r in t.get("reminders", [])
+            if r not in t.get("notified", [])
+        ]
 
-    if remaining:
-        msg += "🔔 " + ", ".join(remaining) + "\n"
+        if remaining:
+            msg += "🔔 " + ", ".join(remaining) + "\n"
 
-    msg += "\n"
+        msg += "\n"
 
     await interaction.edit_original_response(content=msg)
 
