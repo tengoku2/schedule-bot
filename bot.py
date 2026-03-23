@@ -144,31 +144,35 @@ def load_tasks():
     global tasks_list
     print("🔄 load_tasks開始")
 
-    db, cursor = get_cursor()
+    try:
+        db, cursor = get_cursor()
 
-    cursor.execute("""
-        SELECT id, task, due, reminders, notified, channel_id, owner_id, visible_to, status 
-        FROM tasks
-    """)
+        cursor.execute("""
+            SELECT id, task, due, reminders, notified, channel_id, owner_id, visible_to, status 
+            FROM tasks
+        """)
 
-    rows = cursor.fetchall()
+        rows = cursor.fetchall()
 
-    new_list = []
-    for t in rows:
-        new_list.append({
-            "id": t["id"],
-            "task": t["task"],
-            "due": t["due"],  # ← そのまま使う
-            "channel_id": t["channel_id"],
-            "owner_id": t["owner_id"],
-            "visible_to": json.loads(t["visible_to"] or "[]"),
-            "status": t["status"],
-            "notified": json.loads(t["notified"] or "[]"),
-            "reminders": json.loads(t["reminders"] or "[]"),
-        })
+        new_list = []
+        for t in rows:
+            new_list.append({
+                "id": t["id"],
+                "task": t["task"],
+                "due": t["due"],
+                "channel_id": t["channel_id"],
+                "owner_id": t["owner_id"],
+                "visible_to": json.loads(t["visible_to"] or "[]"),
+                "status": t["status"],
+                "notified": json.loads(t["notified"] or "[]"),
+                "reminders": json.loads(t["reminders"] or "[]"),
+            })
 
-    tasks_list = new_list
-    db.close()
+        tasks_list = new_list
+        db.close()
+
+    except Exception as e:
+        print("❌ load_tasks失敗:", e)
 
 # -----------------------
 # Discord設定
@@ -323,7 +327,7 @@ async def list_tasks(interaction: discord.Interaction):
     for i, t in enumerate(tasks_list, 1):
         due = t["due"]
 
-        # 🔥 タイムゾーン補正
+        # タイムゾーン補正
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
 
@@ -356,7 +360,7 @@ async def list_tasks(interaction: discord.Interaction):
 
             remind_time = due - datetime.timedelta(days=days)
 
-            # 🔥 JSTで比較
+            # JSTで比較
             if remind_time <= now:
                 continue
 
@@ -395,20 +399,20 @@ REMINDERS = [
 def label_to_text(label):
     import re
 
-    # 🔥 先に複数形を処理
+    # 先に複数形を処理
     label = label.replace("months", "month")
     label = label.replace("weeks", "week")
     label = label.replace("days", "day")
     label = label.replace("hours", "hour")
 
-    # 🔥 数字だけ抜く
+    # 数字だけ抜く
     match = re.match(r"(\d+)", label)
     if not match:
         return label
 
     num = match.group(1)
 
-    # 🔥 表示
+    # 表示
     if "month" in label:
         return f"{num}ヶ月前"
     elif "week" in label:
@@ -428,7 +432,7 @@ async def reminder_loop():
     print("==== LOOP START ====")
     print("NOW:", now)
 
-    # 🔥 最新DB読み込み
+    # 最新DB読み込み
     await asyncio.to_thread(load_tasks)
 
     print("TASK COUNT:", len(tasks_list))
@@ -444,7 +448,7 @@ async def reminder_loop():
 
         print("DUE:", due)
 
-        # 🔥 期限通知（ここ追加）
+        # 期限通知（ここ追加）
         notified = t.get("notified", [])
 
         if "due" not in notified:
@@ -530,7 +534,10 @@ async def reminder_loop():
 async def on_ready():
     print("🚀 起動完了")
 
-    await asyncio.to_thread(load_tasks)
+    try:
+        await asyncio.to_thread(load_tasks)
+    except Exception as e:
+        print("❌ 初回load失敗:", e)
 
     await tree.sync()
     print("✅ コマンド同期完了")
@@ -538,7 +545,6 @@ async def on_ready():
     if not reminder_loop.is_running():
         reminder_loop.start()
 
-    # 🔥 これ追加
     if not keep_db_alive.is_running():
         keep_db_alive.start()
 
