@@ -537,8 +537,12 @@ async def on_ready():
 
     if not reminder_loop.is_running():
         reminder_loop.start()
-    print("🔔 リマインド開始")
 
+    # 🔥 これ追加
+    if not keep_db_alive.is_running():
+        keep_db_alive.start()
+
+    print("🔔 リマインド開始")
 # -----------------------
 # 実行
 # -----------------------
