@@ -306,6 +306,52 @@ async def add(
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
+# /delete
+# -----------------------
+def delete_task(task_id):
+    db, cursor = get_cursor()
+
+    cursor.execute("DELETE FROM tasks WHERE id=%s", (task_id,))
+
+    db.commit()
+    db.close()
+
+@tree.command(name="delete", description="タスク削除")
+async def delete_task_cmd(
+    interaction: discord.Interaction,
+    index: int
+):
+    await interaction.response.send_message("🗑 削除中...", ephemeral=True)
+
+    # 最新取得
+    await asyncio.to_thread(load_tasks)
+
+    if not tasks_list:
+        await interaction.edit_original_response(content="📭 タスクなし")
+        return
+
+    # 範囲チェック
+    if index < 1 or index > len(tasks_list):
+        await interaction.edit_original_response(content="❌ 番号が不正")
+        return
+
+    task = tasks_list[index - 1]
+
+    try:
+        await asyncio.to_thread(delete_task, task["id"])
+    except Exception as e:
+        print(e)
+        await interaction.edit_original_response(content="❌ 削除失敗")
+        return
+
+    await interaction.edit_original_response(
+        content=f"✅ 削除: {task['task']}"
+    )
+
+    # 更新
+    await asyncio.to_thread(load_tasks)
+
+# -----------------------
 # /list
 # -----------------------
 @tree.command(name="list", description="タスク一覧")
