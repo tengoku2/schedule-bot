@@ -258,6 +258,58 @@ class DeleteConfirmView(discord.ui.View):
             view=None
         )
 
+# -----------------------
+# /status
+# -----------------------
+def update_status(task_id, status):
+    db, cursor = get_cursor()
+
+    cursor.execute(
+        "UPDATE tasks SET status=%s WHERE id=%s",
+        (status, task_id)
+    )
+
+    db.commit()
+    db.close()
+
+@tree.command(name="status", description="タスク状態変更")
+async def status_cmd(
+    interaction: discord.Interaction,
+    task_id: int,
+    status: str
+):
+
+    print("status変更", task_id, status)
+
+    if status not in ["todo", "done"]:
+        await interaction.response.send_message("todo か done を指定", ephemeral=True)
+        return
+
+    try:
+        await interaction.response.send_message("更新中...", ephemeral=True)
+    except:
+        pass
+
+    await asyncio.to_thread(load_tasks)
+
+    task = next((t for t in tasks_list if t["id"] == task_id), None)
+
+    if not task:
+        await interaction.edit_original_response(content="タスクが見つからない")
+        return
+
+    try:
+        await asyncio.to_thread(update_status, task_id, status)
+        await asyncio.to_thread(load_tasks)
+    except Exception as e:
+        print("status更新エラー:", e)
+        await interaction.edit_original_response(content="更新失敗")
+        return
+
+    await interaction.edit_original_response(
+        content=f"状態更新\n[{task_id}] {task['task']} → {status}"
+    )
+
 
 # -----------------------
 # /add
@@ -534,6 +586,10 @@ async def list_tasks(interaction: discord.Interaction):
     msg = "📋 タスク一覧\n"
 
     for i, t in enumerate(tasks_list, 1):
+        
+        if t["status"] != "todo":
+            continue
+
         due = t["due"]
 
         # タイムゾーン補正
