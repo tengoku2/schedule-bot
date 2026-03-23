@@ -209,6 +209,42 @@ def insert_task(task_name, due, channel_id, user_id, reminders):
     db.close()
 
 # -----------------------
+# /view
+# -----------------------
+class DeleteConfirmView(discord.ui.View):
+    def __init__(self, task):
+        super().__init__(timeout=30)
+        self.task = task
+
+    @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await asyncio.to_thread(delete_task, self.task["id"])
+        except Exception as e:
+            print("削除エラー:", e)
+            await interaction.response.edit_message(
+                content="❌ 削除失敗",
+                view=None
+            )
+            return
+
+        await interaction.response.edit_message(
+            content=f"✅ 削除: {self.task['task']}",
+            view=None
+        )
+
+        # 🔥 リスト更新
+        await asyncio.to_thread(load_tasks)
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="❌ キャンセルしました",
+            view=None
+        )
+
+
+# -----------------------
 # /add
 # -----------------------
 @tree.command(name="add", description="タスク追加")
@@ -344,18 +380,17 @@ async def delete_task_cmd(interaction: discord.Interaction, index: int):
 
     print("削除対象:", task["task"], task["id"])
 
-    try:
-        await asyncio.to_thread(delete_task, task["id"])
-    except Exception as e:
-        print("削除エラー:", e)
-        await interaction.edit_original_response(content="❌ 削除失敗")
-        return
+    view = DeleteConfirmView(task)
 
     await interaction.edit_original_response(
-        content=f"✅ 削除: {task['task']}"
+        content=f"⚠️ 本当に削除しますか？\n📝 {task['task']}",
+        view=view
     )
+# -----------------------
+# /edit
+# -----------------------
 
-    await asyncio.to_thread(load_tasks)
+
 # -----------------------
 # /list
 # -----------------------
