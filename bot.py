@@ -597,6 +597,9 @@ async def keep_db_alive():
 async def on_ready():
     print("🚀 起動完了")
 
+    await tree.sync()
+    print("✅ コマンド同期完了")
+
     try:
         await asyncio.to_thread(load_tasks)
     except Exception as e:
