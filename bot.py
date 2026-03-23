@@ -218,21 +218,27 @@ class DeleteConfirmView(discord.ui.View):
 
     @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        # 先に即レスポンス（これが重要）
+        await interaction.response.edit_message(
+            content=f"⏳ 削除中...",
+            view=None
+        )
+
         try:
-            # 削除してリストを更新
+            # 後で処理
             await asyncio.to_thread(delete_task, self.task["id"])
             await asyncio.to_thread(load_tasks)
+
         except Exception as e:
             print("削除エラー:", e)
-            await interaction.response.edit_message(
-                content="❌ 削除失敗",
-                view=None
-            )
+            await interaction.followup.send("❌ 削除失敗", ephemeral=True)
             return
 
-        await interaction.response.edit_message(
-            content=f"✅ 削除: {self.task['task']}",
-            view=None
+        # 完了通知
+        await interaction.followup.send(
+            f"✅ 削除: {self.task['task']}",
+            ephemeral=True
         )
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
