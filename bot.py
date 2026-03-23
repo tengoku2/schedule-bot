@@ -179,7 +179,7 @@ def load_tasks():
 # -----------------------
 intents = discord.Intents.default()
 bot = discord.Client(intents=intents)
-tree = bot.tree
+tree = app_commands.CommandTree(bot)
 
 # -----------------------
 # DB INSERT
@@ -594,8 +594,6 @@ async def keep_db_alive():
 # 起動
 # -----------------------
 GUILD_ID = 1479381180146257950
-
-tree = app_commands.CommandTree(bot)
 
 @bot.event
 async def on_ready():
