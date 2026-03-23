@@ -317,20 +317,21 @@ def delete_task(task_id):
     db.close()
 
 @tree.command(name="delete", description="タスク削除")
-async def delete_task_cmd(
-    interaction: discord.Interaction,
-    index: int
-):
-    await interaction.response.send_message("🗑 削除中...", ephemeral=True)
+async def delete_task_cmd(interaction: discord.Interaction, index: int):
 
-    # 最新取得
+    # まずこれ（最優先）
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except:
+        pass
+
+    # DB更新
     await asyncio.to_thread(load_tasks)
 
     if not tasks_list:
         await interaction.edit_original_response(content="📭 タスクなし")
         return
 
-    # 範囲チェック
     if index < 1 or index > len(tasks_list):
         await interaction.edit_original_response(content="❌ 番号が不正")
         return
@@ -348,9 +349,7 @@ async def delete_task_cmd(
         content=f"✅ 削除: {task['task']}"
     )
 
-    # 更新
     await asyncio.to_thread(load_tasks)
-
 # -----------------------
 # /list
 # -----------------------
@@ -572,6 +571,18 @@ async def reminder_loop():
                 db.close()
             else:
                 print("  NO HIT")
+
+from discord.ext import tasks
+
+@tasks.loop(minutes=5)
+async def keep_db_alive():
+    try:
+        db, cursor = get_cursor()
+        cursor.execute("SELECT 1")
+        db.close()
+        print("💓 DB keep alive")
+    except Exception as e:
+        print("❌ DB keep alive error:", e)
 
 # -----------------------
 # 起動
