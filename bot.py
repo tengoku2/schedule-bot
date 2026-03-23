@@ -404,7 +404,96 @@ async def delete_task_cmd(interaction: discord.Interaction, index: int):
 # -----------------------
 # /edit
 # -----------------------
+def update_task(task_id, task_name, due):
+    db, cursor = get_cursor()
 
+    cursor.execute(
+        "UPDATE tasks SET task=%s, due=%s WHERE id=%s",
+        (task_name, due, task_id)
+    )
+
+    db.commit()
+    db.close()
+
+@tree.command(name="edit", description="タスク編集")
+async def edit_task_cmd(
+    interaction: discord.Interaction,
+    index: int,
+    task_name: str = None,
+    date_str: str = None,
+    time_str: str = None
+):
+
+    print("edit開始", index)
+
+    try:
+        await interaction.response.send_message("処理中...", ephemeral=True)
+    except:
+        pass
+
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
+
+    await asyncio.to_thread(load_tasks)
+
+    if not tasks_list:
+        await interaction.edit_original_response(content="タスクなし")
+        return
+
+    if index < 1 or index > len(tasks_list):
+        await interaction.edit_original_response(content="番号が不正")
+        return
+
+    task = tasks_list[index - 1]
+
+    old_due = task["due"]
+    if old_due.tzinfo is None:
+        old_due = old_due.replace(tzinfo=JST)
+
+    new_name = task_name if task_name else task["task"]
+
+    try:
+        # 日付と時間どっちも未指定
+        if not date_str and not time_str:
+            new_due = old_due
+
+        # 日付なし
+        elif not date_str:
+            t = parse_time(time_str)
+            new_due = datetime.datetime.combine(old_due.date(), t).replace(tzinfo=JST)
+
+        # 時間なし
+        elif not time_str:
+            d = parse_date(date_str)
+            new_due = datetime.datetime.combine(d, old_due.time()).replace(tzinfo=JST)
+
+        # 両方あり
+        else:
+            d = parse_date(date_str)
+            t = parse_time(time_str)
+            new_due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
+
+    except:
+        await interaction.edit_original_response(content="日時形式エラー")
+        return
+
+    try:
+        await asyncio.to_thread(
+            update_task,
+            task["id"],
+            new_name,
+            new_due
+        )
+        await asyncio.to_thread(load_tasks)
+
+    except Exception as e:
+        print("編集エラー:", e)
+        await interaction.edit_original_response(content="編集失敗")
+        return
+
+    await interaction.edit_original_response(
+        content=f"更新完了\n{new_name}\n{new_due.strftime('%m/%d %H:%M')}"
+    )
 
 # -----------------------
 # /list
