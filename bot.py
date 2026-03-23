@@ -215,6 +215,15 @@ class DeleteConfirmView(discord.ui.View):
     def __init__(self, task):
         super().__init__(timeout=30)
         self.task = task
+        self.message = None  # ←追加
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except:
+            pass
 
     @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -229,6 +238,7 @@ class DeleteConfirmView(discord.ui.View):
             # 後で処理
             await asyncio.to_thread(delete_task, self.task["id"])
             await asyncio.to_thread(load_tasks)
+            print("✅ 削除完了:", self.task["id"], self.task["task"])
 
         except Exception as e:
             print("削除エラー:", e)
