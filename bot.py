@@ -368,37 +368,32 @@ def delete_task(task_id):
     db.close()
 
 @tree.command(name="delete", description="タスク削除")
-async def delete_task_cmd(interaction: discord.Interaction, index: int):
+async def delete_task_cmd(interaction: discord.Interaction, task_id: int):
 
-    print("🔥 delete開始", index)
+    print("delete開始", task_id)
 
-    # これが最重要
     try:
         await interaction.response.defer(ephemeral=True)
     except Exception as e:
         print("defer失敗:", e)
 
-    # 最新DB
     await asyncio.to_thread(load_tasks)
 
     print("タスク数:", len(tasks_list))
 
-    if not tasks_list:
-        await interaction.edit_original_response(content="📭 タスクなし")
-        return
+    # IDで取得
+    task = next((t for t in tasks_list if t["id"] == task_id), None)
 
-    if index < 1 or index > len(tasks_list):
-        await interaction.edit_original_response(content="❌ 番号が不正")
+    if not task:
+        await interaction.edit_original_response(content="タスクが見つからない")
         return
-
-    task = tasks_list[index - 1]
 
     print("削除対象:", task["task"], task["id"])
 
     view = DeleteConfirmView(task)
 
     await interaction.edit_original_response(
-        content=f"⚠️ 本当に削除しますか？\n📝 {task['task']}",
+        content=f"削除しますか\n{task['task']}",
         view=view
     )
 # -----------------------
@@ -418,13 +413,13 @@ def update_task(task_id, task_name, due):
 @tree.command(name="edit", description="タスク編集")
 async def edit_task_cmd(
     interaction: discord.Interaction,
-    index: int,
+    task_id: int,
     task_name: str = None,
     date_str: str = None,
     time_str: str = None
 ):
 
-    print("edit開始", index)
+    print("edit開始", task_id)
 
     try:
         await interaction.response.send_message("処理中...", ephemeral=True)
@@ -436,15 +431,12 @@ async def edit_task_cmd(
 
     await asyncio.to_thread(load_tasks)
 
-    if not tasks_list:
-        await interaction.edit_original_response(content="タスクなし")
-        return
+    # IDで検索
+    task = next((t for t in tasks_list if t["id"] == task_id), None)
 
-    if index < 1 or index > len(tasks_list):
-        await interaction.edit_original_response(content="番号が不正")
+    if not task:
+        await interaction.edit_original_response(content="タスクが見つからない")
         return
-
-    task = tasks_list[index - 1]
 
     old_due = task["due"]
     if old_due.tzinfo is None:
@@ -521,7 +513,7 @@ async def list_tasks(interaction: discord.Interaction):
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
 
-        msg += f"{i}. {t['task']}\n"
+        msg += f"{i}. [{t['id']}] {t['task']}\n"
         msg += f"📅 {due.strftime('%m/%d %H:%M')}\n"
 
         remaining = []
