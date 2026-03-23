@@ -621,6 +621,7 @@ async def on_ready():
         keep_db_alive.start()
 
     print("🔔 リマインド開始")
+    print("コマンド一覧:", [c.name for c in tree.get_commands()])
 # -----------------------
 # 実行
 # -----------------------
