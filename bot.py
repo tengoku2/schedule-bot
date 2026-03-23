@@ -593,12 +593,20 @@ async def keep_db_alive():
 # -----------------------
 # 起動
 # -----------------------
+GUILD_ID = 1479381180146257950
+
+tree = app_commands.CommandTree(bot)
+
 @bot.event
 async def on_ready():
     print("🚀 起動完了")
 
-    await tree.sync()
-    print("✅ コマンド同期完了")
+    guild = discord.Object(id=GUILD_ID)
+
+    tree.clear_commands(guild=guild)  # ←重要
+    await tree.sync(guild=guild)
+
+    print("✅ ギルド同期完了")
 
     try:
         await asyncio.to_thread(load_tasks)
