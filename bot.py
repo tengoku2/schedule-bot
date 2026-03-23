@@ -396,15 +396,16 @@ async def delete_task_cmd(interaction: discord.Interaction, task_id: int):
         content=f"削除しますか\n{task['task']}",
         view=view
     )
+
 # -----------------------
 # /edit
 # -----------------------
-def update_task(task_id, task_name, due):
+def update_task_full(task_id, task_name, due, reminders):
     db, cursor = get_cursor()
 
     cursor.execute(
-        "UPDATE tasks SET task=%s, due=%s WHERE id=%s",
-        (task_name, due, task_id)
+        "UPDATE tasks SET task=%s, due=%s, reminders=%s WHERE id=%s",
+        (task_name, due, json.dumps(reminders), task_id)
     )
 
     db.commit()
@@ -416,7 +417,8 @@ async def edit_task_cmd(
     task_id: int,
     task_name: str = None,
     date_str: str = None,
-    time_str: str = None
+    time_str: str = None,
+    reminders: str = None
 ):
 
     print("edit開始", task_id)
@@ -437,12 +439,31 @@ async def edit_task_cmd(
     if not task:
         await interaction.edit_original_response(content="タスクが見つからない")
         return
+    
+    db, cursor = get_cursor()
+    cursor.execute(
+        "UPDATE tasks SET notified=%s WHERE id=%s",
+        (json.dumps([]), task["id"])
+    )
+    db.commit()
+    db.close()
 
     old_due = task["due"]
     if old_due.tzinfo is None:
         old_due = old_due.replace(tzinfo=JST)
 
     new_name = task_name if task_name else task["task"]
+
+    # reminders
+    try:
+        if reminders:
+            reminder_data = parse_reminders(reminders)
+            new_reminders = [label for label, _ in reminder_data]
+        else:
+            new_reminders = task.get("reminders", [])
+    except:
+        await interaction.edit_original_response(content="リマインド形式エラー")
+        return
 
     try:
         # 日付と時間どっちも未指定
@@ -471,10 +492,11 @@ async def edit_task_cmd(
 
     try:
         await asyncio.to_thread(
-            update_task,
+            update_task_full,
             task["id"],
             new_name,
-            new_due
+            new_due,
+            new_reminders
         )
         await asyncio.to_thread(load_tasks)
 
@@ -484,7 +506,12 @@ async def edit_task_cmd(
         return
 
     await interaction.edit_original_response(
-        content=f"更新完了\n{new_name}\n{new_due.strftime('%m/%d %H:%M')}"
+        content=(
+            f"更新完了\n"
+            f"[{task_id}] {new_name}\n"
+            f"{new_due.strftime('%m/%d %H:%M')}\n"
+            f"reminders: {', '.join(new_reminders) if new_reminders else 'なし'}"
+        )
     )
 
 # -----------------------
