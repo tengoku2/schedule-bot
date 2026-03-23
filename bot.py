@@ -319,14 +319,18 @@ def delete_task(task_id):
 @tree.command(name="delete", description="タスク削除")
 async def delete_task_cmd(interaction: discord.Interaction, index: int):
 
-    # まずこれ（最優先）
+    print("🔥 delete開始", index)
+
+    # これが最重要
     try:
         await interaction.response.defer(ephemeral=True)
-    except:
-        pass
+    except Exception as e:
+        print("defer失敗:", e)
 
-    # DB更新
+    # 最新DB
     await asyncio.to_thread(load_tasks)
+
+    print("タスク数:", len(tasks_list))
 
     if not tasks_list:
         await interaction.edit_original_response(content="📭 タスクなし")
@@ -338,10 +342,12 @@ async def delete_task_cmd(interaction: discord.Interaction, index: int):
 
     task = tasks_list[index - 1]
 
+    print("削除対象:", task["task"], task["id"])
+
     try:
         await asyncio.to_thread(delete_task, task["id"])
     except Exception as e:
-        print(e)
+        print("削除エラー:", e)
         await interaction.edit_original_response(content="❌ 削除失敗")
         return
 
