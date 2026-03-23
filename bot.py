@@ -219,7 +219,9 @@ class DeleteConfirmView(discord.ui.View):
     @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            # 削除してリストを更新
             await asyncio.to_thread(delete_task, self.task["id"])
+            await asyncio.to_thread(load_tasks)
         except Exception as e:
             print("削除エラー:", e)
             await interaction.response.edit_message(
@@ -232,9 +234,6 @@ class DeleteConfirmView(discord.ui.View):
             content=f"✅ 削除: {self.task['task']}",
             view=None
         )
-
-        # 🔥 リスト更新
-        await asyncio.to_thread(load_tasks)
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
