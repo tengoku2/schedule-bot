@@ -198,7 +198,7 @@ def insert_task(task_name, due, channel_id, user_id, reminders):
         user_id,
         json.dumps([]),
         json.dumps([]),
-        json.dumps(reminders),  # ←ここ修正🔥
+        json.dumps(reminders),  # ←そのまま保存
         json.dumps([]),
         False,
         False,
@@ -386,7 +386,10 @@ async def add(
     for label, days in reminder_data:
         remind_time = due - datetime.timedelta(days=days)
         if remind_time > now:
-            filtered.append(label)
+            filtered.append({
+                "label": label,
+                "days": days
+            })
 
     try:
         await asyncio.to_thread(
@@ -510,7 +513,10 @@ async def edit_task_cmd(
     try:
         if reminders:
             reminder_data = parse_reminders(reminders)
-            new_reminders = [label for label, _ in reminder_data]
+            new_reminders = [
+                {"label": label, "days": days}
+                for label, days in reminder_data
+            ]
         else:
             new_reminders = task.get("reminders", [])
     except:
@@ -567,6 +573,53 @@ async def edit_task_cmd(
     )
 
 # -----------------------
+# /channel
+# -----------------------
+# def update_channel(task_id, channel_id):
+#     db, cursor = get_cursor()
+
+#     cursor.execute(
+#         "UPDATE tasks SET channel_id=%s WHERE id=%s",
+#         (channel_id, task_id)
+#     )
+
+#     db.commit()
+#     db.close()
+
+# @tree.command(name="channel", description="送信チャンネル変更")
+# async def set_channel(
+#     interaction: discord.Interaction,
+#     task_id: int,
+#     channel: discord.TextChannel
+# ):
+
+#     try:
+#         await interaction.response.send_message("変更中...", ephemeral=True)
+#     except:
+#         pass
+
+#     await asyncio.to_thread(load_tasks)
+
+#     task = next((t for t in tasks_list if t["id"] == task_id), None)
+
+#     if not task:
+#         await interaction.edit_original_response(content="タスクが見つからない")
+#         return
+
+#     try:
+#         await asyncio.to_thread(update_channel, task_id, channel.id)
+#         await asyncio.to_thread(load_tasks)
+#     except Exception as e:
+#         print("チャンネル更新エラー:", e)
+#         await interaction.edit_original_response(content="更新失敗")
+#         return
+
+#     await interaction.edit_original_response(
+#         content=f"送信先変更\n[{task_id}] → #{channel.name}"
+#     )
+
+
+# -----------------------
 # /list
 # -----------------------
 @tree.command(name="list", description="タスク一覧")
@@ -602,35 +655,16 @@ async def list_tasks(interaction: discord.Interaction):
         remaining = []
 
         for r in t.get("reminders", []):
-            if isinstance(r, list):
-                r = r[0]
-
-            import re
-            match = re.match(r"(\d+)", r)
-            if not match:
-                continue
-
-            num = int(match.group(1))
-
-            if "month" in r:
-                days = num * 30
-            elif "week" in r:
-                days = num * 7
-            elif "day" in r:
-                days = num
-            elif "hour" in r:
-                days = num / 24
-            else:
-                continue
+            label = r["label"]
+            days = r["days"]
 
             remind_time = due - datetime.timedelta(days=days)
 
-            # JSTで比較
             if remind_time <= now:
                 continue
 
-            if r not in t.get("notified", []):
-                remaining.append(label_to_text(r))
+            if label not in t.get("notified", []):
+                remaining.append(label_to_text(label))
 
         if remaining:
             msg += "🔔 " + ", ".join(remaining) + "\n"
@@ -713,6 +747,35 @@ async def reminder_loop():
 
         print("DUE:", due)
 
+        # -----------------------
+        # 日次リマインド（NEW）
+        # -----------------------
+        today_str = now.strftime("%Y-%m-%d")
+        notified = t.get("notified", [])
+
+        # doneならスキップ
+        if t.get("status") != "done":
+
+            # 0:00〜0:01で1回だけ
+            if now.hour == 0 and now.minute <= 1:
+
+                if today_str not in notified:
+                    print("🌙 日次リマインド")
+
+                    channel = bot.get_channel(t["channel_id"])
+                    if channel:
+                        await channel.send(f"🔁 未完了タスク: {t['task']}")
+
+                    notified.append(today_str)
+
+                    db, cursor = get_cursor()
+                    cursor.execute(
+                        "UPDATE tasks SET notified=%s WHERE id=%s",
+                        (json.dumps(notified), t["id"])
+                    )
+                    db.commit()
+                    db.close()
+
         # 期限通知（ここ追加）
         notified = t.get("notified", [])
 
@@ -740,39 +803,16 @@ async def reminder_loop():
         print("REMINDERS:", reminder_settings)
         print("NOTIFIED:", notified)
 
-        import re
-
-        for label in reminder_settings:
-            match = re.match(r"(\d+)", label)
-            if not match:
-                print("SKIP: フォーマット不正", label)
-                continue
-
-            num = int(match.group(1))
-
-            if "month" in label:
-                days = num * 30
-            elif "week" in label:
-                days = num * 7
-            elif "day" in label:
-                days = num
-            elif "hour" in label:
-                days = num / 24
-            else:
-                print("SKIP: 単位不明", label)
-                continue
+        for r in reminder_settings:
+            label = r["label"]
+            days = r["days"]
 
             remind_time = due - datetime.timedelta(days=days)
 
-            print(f"CHECK: {label}")
-            print("  remind_time:", remind_time)
-
             if label in notified:
-                print("  SKIP: 既に通知済み")
                 continue
 
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
-                print("  🔥 HIT!!!! SEND!!!!")
 
                 channel = bot.get_channel(t["channel_id"])
                 if channel:
