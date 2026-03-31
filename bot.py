@@ -627,53 +627,6 @@ async def edit_task_cmd(
     )
 
 # -----------------------
-# /channel
-# -----------------------
-# def update_channel(task_id, channel_id):
-#     db, cursor = get_cursor()
-
-#     cursor.execute(
-#         "UPDATE tasks SET channel_id=%s WHERE id=%s",
-#         (channel_id, task_id)
-#     )
-
-#     db.commit()
-#     db.close()
-
-# @tree.command(name="channel", description="送信チャンネル変更")
-# async def set_channel(
-#     interaction: discord.Interaction,
-#     task_id: int,
-#     channel: discord.TextChannel
-# ):
-
-#     try:
-#         await interaction.response.send_message("変更中...", ephemeral=True)
-#     except:
-#         pass
-
-#     await asyncio.to_thread(load_tasks)
-
-#     task = next((t for t in tasks_list if t["id"] == task_id), None)
-
-#     if not task:
-#         await interaction.edit_original_response(content="タスクが見つからない")
-#         return
-
-#     try:
-#         await asyncio.to_thread(update_channel, task_id, channel.id)
-#         await asyncio.to_thread(load_tasks)
-#     except Exception as e:
-#         print("チャンネル更新エラー:", e)
-#         await interaction.edit_original_response(content="更新失敗")
-#         return
-
-#     await interaction.edit_original_response(
-#         content=f"送信先変更\n[{task_id}] → #{channel.name}"
-#     )
-
-
-# -----------------------
 # /list
 # -----------------------
 @tree.command(name="list", description="タスク一覧")
