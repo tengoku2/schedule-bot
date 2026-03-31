@@ -148,7 +148,7 @@ def load_tasks():
         db, cursor = get_cursor()
 
         cursor.execute("""
-            SELECT id, task, due, reminders, notified, channel_id, owner_id, visible_to, status 
+            SELECT id, task, due, reminders, notified, channel_id, owner_id, visible_to, status, guild_id
             FROM tasks
         """)
 
@@ -164,6 +164,7 @@ def load_tasks():
                 "owner_id": t["owner_id"],
                 "visible_to": json.loads(t["visible_to"] or "[]"),
                 "status": t["status"],
+                "guild_id": t["guild_id"],
                 "notified": json.loads(t["notified"] or "[]"),
                 "reminders": json.loads(t["reminders"] or "[]"),
             })
@@ -184,13 +185,13 @@ tree = app_commands.CommandTree(bot)
 # -----------------------
 # DB INSERT
 # -----------------------
-def insert_task(task_name, due, channel_id, user_id, reminders):
+def insert_task(task_name, due, channel_id, user_id, guild_id, reminders):
     db, cursor = get_cursor()
 
     cursor.execute("""
     INSERT INTO tasks 
-    (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    (task, due, channel_id, owner_id, visible_to, roles, reminders, notified, mention, everyone, status, guild_id)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
         task_name,
         due,
@@ -202,7 +203,8 @@ def insert_task(task_name, due, channel_id, user_id, reminders):
         json.dumps([]),
         False,
         False,
-        "todo"
+        "todo",
+        guild_id
     ))
 
     db.commit()
@@ -398,6 +400,7 @@ async def add(
             due,
             interaction.channel.id,
             interaction.user.id,
+            interaction.guild.id,
             filtered
         )
     except Exception as e:
@@ -636,21 +639,33 @@ async def list_tasks(interaction: discord.Interaction):
         await interaction.edit_original_response(content="📭 タスクなし")
         return
 
+    # サーバーエラー用
+    if not interaction.guild:
+        await interaction.edit_original_response(content="サーバー内で使ってください")
+        return
+    
     msg = "📋 タスク一覧\n"
 
-    for i, t in enumerate(tasks_list, 1):
-        
+    i = 1
+    for t in tasks_list:
+
+        if t.get("guild_id") != interaction.guild.id:
+            continue
+
         if t["status"] != "todo":
             continue
 
+        msg += f"{i}. [{t['id']}] {t['task']}\n"
+        
         due = t["due"]
 
         # タイムゾーン補正
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
 
-        msg += f"{i}. [{t['id']}] {t['task']}\n"
         msg += f"📅 {due.strftime('%m/%d %H:%M')}\n"
+        
+        i += 1
 
         remaining = []
 
