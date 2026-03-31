@@ -626,7 +626,10 @@ async def edit_task_cmd(
 # /list
 # -----------------------
 @tree.command(name="list", description="タスク一覧")
-async def list_tasks(interaction: discord.Interaction):
+async def list_tasks(
+    interaction: discord.Interaction,
+    mode: str = "todo"
+):
 
     await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
 
@@ -644,7 +647,7 @@ async def list_tasks(interaction: discord.Interaction):
         await interaction.edit_original_response(content="サーバー内で使ってください")
         return
     
-    msg = "📋 タスク一覧\n"
+    msg = f"📋 タスク一覧 ({mode})\n"
 
     i = 1
     for t in tasks_list:
@@ -653,12 +656,26 @@ async def list_tasks(interaction: discord.Interaction):
         if t.get("guild_id") != interaction.guild.id:
             continue
 
-        # チャンネル分離
-        if t["channel_id"] != interaction.channel.id:
-            continue
+        # チャンネル分離と合同
+        if mode != "all":
+            if t["channel_id"] != interaction.channel.id:
+                continue
+        
+        # ステータス
+        if mode == "todo":
+            if t["status"] != "todo":
+                continue
 
-        if t["status"] != "todo":
-            continue
+        elif mode == "done":
+            if t["status"] != "done":
+                continue
+
+        elif mode == "all":
+            pass
+
+        else:
+            await interaction.edit_original_response(content="modeは todo / done / all")
+            return
 
         msg += f"{i}. [{t['id']}] {t['task']}\n"
         
