@@ -212,6 +212,33 @@ def insert_task(task_name, due, channel_id, user_id, guild_id, reminders):
     db.close()
 
 # -----------------------
+# /is_manager 権限管理！
+# -----------------------
+def is_manager(interaction):
+    try:
+        db, cursor = get_cursor()
+
+        cursor.execute(
+            "SELECT manager_role_id FROM guild_settings WHERE guild_id=%s",
+            (interaction.guild.id,)
+        )
+
+        row = cursor.fetchone()
+        db.close()
+
+        if not row:
+            return False
+
+        role_id = row["manager_role_id"]
+
+        return any(role.id == role_id for role in interaction.user.roles)
+
+    except Exception as e:
+        print("manager取得エラー:", e)
+        return False
+
+
+# -----------------------
 # /view
 # -----------------------
 class DeleteConfirmView(discord.ui.View):
@@ -293,8 +320,17 @@ async def status_cmd(
 
     task = next((t for t in tasks_list if t["id"] == task_id), None)
 
+    # タスク確認
     if not task:
         await interaction.edit_original_response(content="タスクが見つからない")
+        return
+    
+    # 権限確認
+    if not (
+        interaction.user.id == task["owner_id"]
+        or is_manager(interaction)
+    ):
+        await interaction.edit_original_response(content="❌ 権限がありません")
         return
 
     try:
@@ -439,8 +475,17 @@ async def delete_task_cmd(interaction: discord.Interaction, task_id: int):
     # IDで取得
     task = next((t for t in tasks_list if t["id"] == task_id), None)
 
+    # タスク確認
     if not task:
         await interaction.edit_original_response(content="タスクが見つからない")
+        return
+
+    # 権限確認
+    if not (
+        interaction.user.id == task["owner_id"]
+        or is_manager(interaction)
+    ):
+        await interaction.edit_original_response(content="❌ 権限がありません")
         return
 
     print("削除対象:", task["task"], task["id"])
@@ -491,8 +536,17 @@ async def edit_task_cmd(
     # IDで検索
     task = next((t for t in tasks_list if t["id"] == task_id), None)
 
+    # タスク確認
     if not task:
         await interaction.edit_original_response(content="タスクが見つからない")
+        return
+
+    # 権限確認
+    if not (
+        interaction.user.id == task["owner_id"]
+        or is_manager(interaction)
+    ):
+        await interaction.edit_original_response(content="❌ 権限がありません")
         return
     
     db, cursor = get_cursor()
@@ -568,7 +622,7 @@ async def edit_task_cmd(
             f"更新完了\n"
             f"[{task_id}] {new_name}\n"
             f"{new_due.strftime('%m/%d %H:%M')}\n"
-            f"reminders: {', '.join(new_reminders) if new_reminders else 'なし'}"
+            f"reminders: {', '.join([r['label'] for r in new_reminders]) if new_reminders else 'なし'}"
         )
     )
 
@@ -877,6 +931,59 @@ async def keep_db_alive():
         print("💓 DB keep alive")
     except Exception as e:
         print("❌ DB keep alive error:", e)
+
+# -----------------------
+# /set_manager_role
+# -----------------------
+@tree.command(name="set_manager_role", description="管理ロール設定")
+async def set_manager_role(
+    interaction: discord.Interaction,
+    role: discord.Role
+):
+
+    # サーバー外対策
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    # 権限チェック（初期設定用）
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message(
+            "サーバー管理者のみ設定できます",
+            ephemeral=True
+        )
+        return
+        
+
+    try:
+        await interaction.response.send_message("設定中...", ephemeral=True)
+    except:
+        pass
+
+    try:
+        db, cursor = get_cursor()
+
+        cursor.execute("""
+        INSERT INTO guild_settings (guild_id, manager_role_id)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE manager_role_id=%s
+        """, (
+            interaction.guild.id,
+            role.id,
+            role.id
+        ))
+
+        db.commit()
+        db.close()
+
+    except Exception as e:
+        print("設定エラー:", e)
+        await interaction.edit_original_response(content="❌ 設定失敗")
+        return
+
+    await interaction.edit_original_response(
+        content=f"✅ 管理ロール設定: {role.name}"
+    )
 
 # -----------------------
 # 起動
