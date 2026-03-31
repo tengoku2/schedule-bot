@@ -649,7 +649,12 @@ async def list_tasks(interaction: discord.Interaction):
     i = 1
     for t in tasks_list:
 
+        # サーバー分離
         if t.get("guild_id") != interaction.guild.id:
+            continue
+
+        # チャンネル分離
+        if t["channel_id"] != interaction.channel.id:
             continue
 
         if t["status"] != "todo":
