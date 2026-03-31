@@ -8,6 +8,7 @@ import mysql.connector
 import threading
 from flask import Flask
 from waitress import serve
+from typing import Literal
 
 # -----------------------
 # Flask（Koyeb用）
@@ -278,14 +279,10 @@ def update_status(task_id, status):
 async def status_cmd(
     interaction: discord.Interaction,
     task_id: int,
-    status: str
+    status: Literal["todo", "done"]
 ):
 
     print("status変更", task_id, status)
-
-    if status not in ["todo", "done"]:
-        await interaction.response.send_message("todo か done を指定", ephemeral=True)
-        return
 
     try:
         await interaction.response.send_message("更新中...", ephemeral=True)
@@ -628,7 +625,7 @@ async def edit_task_cmd(
 @tree.command(name="list", description="タスク一覧")
 async def list_tasks(
     interaction: discord.Interaction,
-    mode: str = "todo"
+    mode: Literal["todo", "done", "all"] = "todo"
 ):
 
     await interaction.response.send_message("⏳ 読み込み中...", ephemeral=True)
