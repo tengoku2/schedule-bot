@@ -445,6 +445,16 @@ async def add(
         content=f"✅ 追加: {task_name}\n📅 {due.strftime('%m/%d %H:%M')}"
     )
 
+    notify_channel_id = get_notify_channel(interaction.guild.id)
+
+    if notify_channel_id:
+        ch = bot.get_channel(notify_channel_id)
+        if ch:
+            await ch.send(
+                f"🆕 タスク追加: {task_name}\n"
+                f"📅 {due.strftime('%m/%d %H:%M')}"
+            )
+
     asyncio.create_task(asyncio.to_thread(load_tasks))
 
 # -----------------------
@@ -795,15 +805,19 @@ async def reminder_loop():
         notified = t.get("notified", [])
 
         # doneならスキップ
-        if t.get("status") != "done":
+        if t.get("status") != "done" and now >= due:
 
-            # 0:00〜0:01で1回だけ
-            if now.hour == 0 and now.minute <= 1:
+            # 1回だけ
+            if now.hour == 0 and now.minute == 0:
 
                 if today_str not in notified:
                     print("🌙 日次リマインド")
 
-                    channel = bot.get_channel(t["channel_id"])
+                    notify_channel_id = get_notify_channel(t["guild_id"])
+
+                    target_channel_id = notify_channel_id or t["channel_id"]
+
+                    channel = bot.get_channel(target_channel_id)
                     if channel:
                         await channel.send(f"🔁 未完了タスク: {t['task']}")
 
@@ -817,14 +831,18 @@ async def reminder_loop():
                     db.commit()
                     db.close()
 
-        # 期限通知（ここ追加）
+        # 期限通知
         notified = t.get("notified", [])
 
         if "due" not in notified:
             if now >= due:
                 print("🔥 期限通知発火")
 
-                channel = bot.get_channel(t["channel_id"])
+                notify_channel_id = get_notify_channel(t["guild_id"])
+
+                target_channel_id = notify_channel_id or t["channel_id"]
+
+                channel = bot.get_channel(target_channel_id)
                 if channel:
                     await channel.send(f"⏰ 期限です: {t['task']}")
 
@@ -855,7 +873,11 @@ async def reminder_loop():
 
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
 
-                channel = bot.get_channel(t["channel_id"])
+                notify_channel_id = get_notify_channel(t["guild_id"])
+
+                target_channel_id = notify_channel_id or t["channel_id"]
+
+                channel = bot.get_channel(target_channel_id)
                 if channel:
                     await channel.send(
                         f"⏰ {label_to_text(label)}リマインド: {t['task']}"
@@ -884,6 +906,56 @@ async def keep_db_alive():
         print("💓 DB keep alive")
     except Exception as e:
         print("❌ DB keep alive error:", e)
+
+# -----------------------
+# /channel
+# -----------------------
+def get_notify_channel(guild_id):
+    db, cursor = get_cursor()
+
+    cursor.execute(
+        "SELECT notify_channel_id FROM guild_settings WHERE guild_id=%s",
+        (guild_id,)
+    )
+
+    row = cursor.fetchone()
+    db.close()
+
+    return row["notify_channel_id"] if row else None
+
+@tree.command(name="set_notify_channel", description="通知チャンネル設定")
+async def set_notify_channel(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel
+):
+
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("管理者のみ設定可能", ephemeral=True)
+        return
+
+    db, cursor = get_cursor()
+
+    cursor.execute("""
+    INSERT INTO guild_settings (guild_id, notify_channel_id)
+    VALUES (%s, %s)
+    ON DUPLICATE KEY UPDATE notify_channel_id=%s
+    """, (
+        interaction.guild.id,
+        channel.id,
+        channel.id
+    ))
+
+    db.commit()
+    db.close()
+
+    await interaction.response.send_message(
+        f"✅ 通知チャンネル設定: {channel.name}",
+        ephemeral=True
+    )
 
 # -----------------------
 # /set_manager_role
@@ -970,6 +1042,7 @@ async def on_ready():
 
     print("🔔 リマインド開始")
     print("コマンド一覧:", [c.name for c in tree.get_commands()])
+
 # -----------------------
 # 実行
 # -----------------------
@@ -979,8 +1052,8 @@ def start_bot():
 if __name__ == "__main__":
     import threading
 
-    # 🔥 Flaskを裏で起動
+    # Flaskを裏で起動
     threading.Thread(target=run_web, daemon=True).start()
 
-    # 🔥 Botをメインで起動（超重要）
+    # Botをメインで起動（超重要）
     bot.run(os.environ.get("TOKEN"))
