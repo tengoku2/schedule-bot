@@ -9,6 +9,7 @@ import threading
 from flask import Flask
 from waitress import serve
 from typing import Literal
+from discord import app_commands
 
 # -----------------------
 # Flask（Koyeb用）
@@ -42,68 +43,98 @@ def get_cursor():
     return db, db.cursor(dictionary=True)
 
 # -----------------------
-# 日付パース
+# パース関数
 # -----------------------
-def parse_date(date_str):
-    now = datetime.datetime.now()
+def parse_datetime_input(dt_str):
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
 
-    # YYYY-MM-DD
+    if not dt_str:
+        tomorrow = now.date() + datetime.timedelta(days=1)
+        return datetime.datetime.combine(
+            tomorrow,
+            datetime.time(0, 0),
+            tzinfo=JST
+        )
+
+    if not dt_str.isdigit():
+        raise ValueError("数値で入力してください")
+
+    n = len(dt_str)
+
+    # -----------------------
+    # 時間のみ（1〜4桁）
+    # -----------------------
+    if n <= 4:
+        if n <= 2:
+            hour = int(dt_str)
+            minute = 0
+        else:
+            hour = int(dt_str[:-2])
+            minute = int(dt_str[-2:])
+
+        if hour > 24 or minute >= 60:
+            raise ValueError("時間形式エラー")
+
+        if hour == 24:
+            hour = 0
+            add_day = True
+        else:
+            add_day = False
+
+        due = datetime.datetime.combine(
+            now.date(),
+            datetime.time(hour, minute),
+            tzinfo=JST
+        )
+
+        if due <= now or add_day:
+            due += datetime.timedelta(days=1)
+
+        return due
+
+    # -----------------------
+    # 日付 + 時間（5〜8桁）
+    # -----------------------
+    time_part = dt_str[-4:]
+    hour = int(time_part[:2])
+    minute = int(time_part[2:])
+
+    if hour >= 24 or minute >= 60:
+        raise ValueError("時間形式エラー")
+
+    date_part = dt_str[:-4]
+
+    # MMDD or MD の曖昧解消ルール
+    if len(date_part) == 2:
+        month = int(date_part[0])
+        day = int(date_part[1])
+
+    elif len(date_part) == 3:
+        month = int(date_part[0])
+        day = int(date_part[1:3])
+
+    elif len(date_part) == 4:
+        month = int(date_part[:2])
+        day = int(date_part[2:4])
+
+    else:
+        raise ValueError("日付形式エラー")
+
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        raise ValueError("日付エラー")
+
+    year = now.year
+
     try:
-        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-    except:
-        pass
+        due = datetime.datetime(year, month, day, hour, minute, tzinfo=JST)
+    except ValueError:
+        raise ValueError("存在しない日付です")
 
-    # 数字（3桁 or 4桁）
-    if date_str.isdigit():
-        if len(date_str) in [3, 4]:
-            if len(date_str) == 3:
-                month = int(date_str[0])
-                day = int(date_str[1:])
-            else:
-                month = int(date_str[:2])
-                day = int(date_str[2:])
+    if due <= now:
+        due = due.replace(year=year + 1)
 
-            year = now.year
-            d = datetime.date(year, month, day)
-
-            if d < now.date():
-                d = datetime.date(year + 1, month, day)
-
-            return d
-
-    # M/D
-    if "/" in date_str:
-        try:
-            m, d = map(int, date_str.split("/"))
-            year = now.year
-            d = datetime.date(year, m, d)
-
-            if d < now.date():
-                d = datetime.date(year + 1, m, d)
-
-            return d
-        except:
-            pass
-
-    # 最後にエラー
-    raise ValueError("日付形式エラー")
-
-# -----------------------
-# 時間パース
-# -----------------------
-def parse_time(time_str):
-    if ":" in time_str:
-        return datetime.datetime.strptime(time_str, "%H:%M").time()
-
-    if time_str.isdigit():
-        if len(time_str) <= 2:
-            return datetime.time(int(time_str), 0)
-        elif len(time_str) in [3, 4]:
-            hour = int(time_str[:-2])
-            minute = int(time_str[-2:])
-            return datetime.time(hour, minute)
-
-    raise ValueError("時間形式エラー")
+    return due
 
 # -----------------------
 # REMINDERパース
@@ -353,8 +384,7 @@ async def status_cmd(
 async def add(
     interaction: discord.Interaction,
     task_name: str,
-    date_str: str = None,
-    time_str: str = None,
+    dt_str: str = None,
     reminders: str = None
 ):
 
@@ -373,37 +403,9 @@ async def add(
     now = datetime.datetime.now(JST)
 
     try:
-        # 両方なし
-        if not date_str and not time_str:
-            tomorrow = now.date() + datetime.timedelta(days=1)
-            due = datetime.datetime.combine(tomorrow, datetime.time(0, 0)).replace(tzinfo=JST)
-
-        # dateなし
-        elif not date_str:
-            t = parse_time(time_str)
-            today_due = datetime.datetime.combine(now.date(), t).replace(tzinfo=JST)
-
-            if today_due > now:
-                due = today_due
-            else:
-                due = today_due + datetime.timedelta(days=1)
-
-        # timeなし
-        elif not time_str:
-            d = parse_date(date_str)
-
-            if d == now.date():
-                due = datetime.datetime.combine(d, datetime.time(23, 59)).replace(tzinfo=JST)
-            else:
-                due = datetime.datetime.combine(d, datetime.time(0, 0)).replace(tzinfo=JST)
-
-        # 両方あり
-        else:
-            d = parse_date(date_str)
-            t = parse_time(time_str)
-            due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
-
-    except:
+        due = parse_datetime_input(dt_str)
+    except Exception as e:
+        print("日時パースエラー:", e)
         await interaction.edit_original_response(content="❌ 日時形式エラー")
         return
 
@@ -456,6 +458,51 @@ async def add(
             )
 
     asyncio.create_task(asyncio.to_thread(load_tasks))
+
+# /add Autocomplete
+@add.autocomplete("dt_str")
+async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
+
+    if not current:
+        return [
+            app_commands.Choice(name="明日の0時", value=""),
+            app_commands.Choice(name="3時間後", value="300"),
+            app_commands.Choice(name="今日18:00", value="1800"),
+        ]
+
+    if not current.isdigit():
+        return []
+
+    try:
+        due = parse_datetime_input(current)
+        diff = due - now
+
+        days = diff.days
+        hours = diff.seconds // 3600
+        minutes = (diff.seconds % 3600) // 60
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}日")
+        if hours > 0:
+            parts.append(f"{hours}時間")
+        if minutes > 0:
+            parts.append(f"{minutes}分")
+
+        remain_text = "".join(parts) if parts else "すぐ"
+
+        label = f"{current} → {due.strftime('%m/%d %H:%M')}（{remain_text}後）"
+
+        return [
+            app_commands.Choice(name=label, value=current)
+        ]
+
+    except Exception:
+        return [
+            app_commands.Choice(name="❌ 形式エラー", value=current)
+        ]
 
 # -----------------------
 # /delete
@@ -526,8 +573,7 @@ async def edit_task_cmd(
     interaction: discord.Interaction,
     task_id: int,
     task_name: str = None,
-    date_str: str = None,
-    time_str: str = None,
+    dt_str: str = None,
     reminders: str = None
 ):
 
@@ -587,28 +633,14 @@ async def edit_task_cmd(
         await interaction.edit_original_response(content="リマインド形式エラー")
         return
 
+    # 日付処理
     try:
-        # 日付と時間どっちも未指定
-        if not date_str and not time_str:
-            new_due = old_due
-
-        # 日付なし
-        elif not date_str:
-            t = parse_time(time_str)
-            new_due = datetime.datetime.combine(old_due.date(), t).replace(tzinfo=JST)
-
-        # 時間なし
-        elif not time_str:
-            d = parse_date(date_str)
-            new_due = datetime.datetime.combine(d, old_due.time()).replace(tzinfo=JST)
-
-        # 両方あり
+        if dt_str:
+            new_due = parse_datetime_input(dt_str)
         else:
-            d = parse_date(date_str)
-            t = parse_time(time_str)
-            new_due = datetime.datetime.combine(d, t).replace(tzinfo=JST)
-
-    except:
+            new_due = old_due
+    except Exception as e:
+        print("edit日時エラー:", e)
         await interaction.edit_original_response(content="日時形式エラー")
         return
 
@@ -635,6 +667,51 @@ async def edit_task_cmd(
             f"reminders: {', '.join([r['label'] for r in new_reminders]) if new_reminders else 'なし'}"
         )
     )
+
+# /edit Autocomplete
+@edit_task_cmd.autocomplete("dt_str")
+async def edit_dt_autocomplete(interaction: discord.Interaction, current: str):
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
+
+    if not current:
+        return [
+            app_commands.Choice(name="明日の0時", value=""),
+            app_commands.Choice(name="3時間後", value="300"),
+            app_commands.Choice(name="今日18:00", value="1800"),
+        ]
+
+    if not current.isdigit():
+        return []
+
+    try:
+        due = parse_datetime_input(current)
+        diff = due - now
+
+        days = diff.days
+        hours = diff.seconds // 3600
+        minutes = (diff.seconds % 3600) // 60
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}日")
+        if hours > 0:
+            parts.append(f"{hours}時間")
+        if minutes > 0:
+            parts.append(f"{minutes}分")
+
+        remain_text = "".join(parts) if parts else "すぐ"
+
+        label = f"{current} → {due.strftime('%m/%d %H:%M')}（{remain_text}後）"
+
+        return [
+            app_commands.Choice(name=label, value=current)
+        ]
+
+    except Exception:
+        return [
+            app_commands.Choice(name="❌ 形式エラー", value=current)
+        ]
 
 # -----------------------
 # /list
