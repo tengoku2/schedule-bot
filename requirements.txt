@@ -3,3 +3,5 @@ pytz==2023.3
 mysql-connector-python
 Flask
 waitress
+python-dotenv
+pytest

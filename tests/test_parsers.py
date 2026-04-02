@@ -1,0 +1,77 @@
+import datetime
+import unittest
+from unittest.mock import patch
+
+import bot
+
+
+class FixedDateTime(datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        base = cls(2026, 4, 2, 12, 0, 0)
+        if tz is not None:
+            return base.replace(tzinfo=tz)
+        return base
+
+
+class ParseDateTimeInputTests(unittest.TestCase):
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_empty_input_defaults_to_tomorrow_midnight(self):
+        due = bot.parse_datetime_input("")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 0)
+        self.assertEqual(due.minute, 0)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_time_only_rolls_to_next_day_when_in_past(self):
+        due = bot.parse_datetime_input("310")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 3)
+        self.assertEqual(due.minute, 10)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_month_day_rolls_to_next_year_when_in_past(self):
+        due = bot.parse_datetime_input("411000")
+        self.assertEqual(due.year, 2027)
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 1)
+        self.assertEqual(due.hour, 10)
+        self.assertEqual(due.minute, 0)
+
+    def test_invalid_non_numeric_input(self):
+        with self.assertRaises(ValueError):
+            bot.parse_datetime_input("ab")
+
+
+class ParseRemindersTests(unittest.TestCase):
+    def test_parse_reminders(self):
+        parsed = bot.parse_reminders("1d,3h")
+        self.assertEqual(parsed, [("1day", 1), ("3hour", 3 / 24)])
+
+
+class NotificationRoutingTests(unittest.TestCase):
+    @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
+    def test_resolve_notification_channel_prefers_task_channel(self, _mock_settings):
+        task = {"notify_channel_id": 100, "channel_id": 10, "guild_id": 1}
+        self.assertEqual(bot.resolve_notification_channel_id(task), 100)
+
+    @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
+    def test_resolve_notification_channel_falls_back_to_guild(self, _mock_settings):
+        task = {"notify_channel_id": None, "channel_id": 10, "guild_id": 1}
+        self.assertEqual(bot.resolve_notification_channel_id(task), 200)
+
+    @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
+    def test_build_manager_mention_only_for_guild_notify(self, _mock_settings):
+        task = {"notify_channel_id": None, "channel_id": 10, "guild_id": 1}
+        self.assertEqual(bot.build_manager_mention(task), "<@&300> ")
+
+    @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
+    def test_build_manager_mention_skips_task_specific_channel(self, _mock_settings):
+        task = {"notify_channel_id": 100, "channel_id": 10, "guild_id": 1}
+        self.assertEqual(bot.build_manager_mention(task), "")
+
+
+if __name__ == "__main__":
+    unittest.main()
