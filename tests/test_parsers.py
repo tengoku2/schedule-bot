@@ -146,6 +146,14 @@ class LabelToTextTests(unittest.TestCase):
         self.assertEqual(bot.label_to_text("1month"), "1ヶ月前")
 
 
+class DeleteLogFormattingTests(unittest.TestCase):
+    def test_format_delete_log_message(self):
+        self.assertEqual(
+            bot.format_delete_log_message("alice", 3),
+            "🗑【削除】\n実行者: alice\n3件削除",
+        )
+
+
 class ManagerMemberTests(unittest.TestCase):
     def test_is_manager_member_true_when_role_matches(self):
         member = SimpleNamespace(roles=[SimpleNamespace(id=10), SimpleNamespace(id=20)])

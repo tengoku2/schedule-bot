@@ -525,6 +525,10 @@ async def get_target_channel(channel_id):
 
 
 async def send_task_notification(task, message):
+    return await send_task_notification_with_mentions(task, message)
+
+
+async def send_task_notification_with_mentions(task, message, allowed_mentions_override=None):
     # 通知優先順位:
     # 1. tasks.notify_channel_id
     # 2. guild_settings.notify_channel_id
@@ -566,6 +570,8 @@ async def send_task_notification(task, message):
         )
 
     content = f"{build_manager_mention(task)}{message}"
+    if allowed_mentions_override is not None:
+        allowed_mentions = allowed_mentions_override
     try:
         await channel.send(
             content,
@@ -576,6 +582,31 @@ async def send_task_notification(task, message):
         return False
 
     return True
+
+
+def format_delete_log_message(executor_name, count):
+    return (
+        "🗑【削除】\n"
+        f"実行者: {executor_name}\n"
+        f"{count}件削除"
+    )
+
+
+async def send_delete_log(tasks_for_log, executor_name):
+    if not tasks_for_log:
+        return
+
+    grouped = {}
+    for task in tasks_for_log:
+        channel_id = resolve_notification_channel_id(task)
+        grouped.setdefault(channel_id, []).append(task)
+
+    for grouped_tasks in grouped.values():
+        await send_task_notification_with_mentions(
+            grouped_tasks[0],
+            format_delete_log_message(executor_name, len(grouped_tasks)),
+            allowed_mentions_override=discord.AllowedMentions.none(),
+        )
 
 
 def format_due_message(task, due):
@@ -628,6 +659,7 @@ class DeleteConfirmView(discord.ui.View):
         try:
             await run_blocking(delete_task, self.task["id"])
             await run_blocking(load_tasks)
+            await send_delete_log([self.task], interaction.user.display_name)
         except Exception as e:
             print("[delete] error:", e)
             await interaction.followup.send("削除失敗", ephemeral=True)
@@ -658,9 +690,9 @@ class BulkDeleteConfirmView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Deleting...", view=None)
         try:
-            for task in self.tasks_to_delete:
-                await run_blocking(delete_task, task["id"])
+            await run_blocking(delete_tasks_bulk, [task["id"] for task in self.tasks_to_delete])
             await run_blocking(load_tasks)
+            await send_delete_log(self.tasks_to_delete, interaction.user.display_name)
         except Exception as e:
             print("[bulk_delete] error:", e)
             await interaction.followup.send("Bulk delete failed", ephemeral=True)
@@ -694,7 +726,7 @@ class BulkActionConfirmView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content=f"{self.action_name}中...", view=None)
         try:
-            await self.callback(self.tasks_to_apply)
+            await self.callback(self.tasks_to_apply, interaction)
         except Exception as e:
             print("[bulk_action] error:", e)
             await interaction.followup.send(f"{self.action_name}に失敗しました", ephemeral=True)
@@ -836,9 +868,10 @@ class TaskActionsView(discord.ui.View):
         await interaction.response.send_message("\n".join(lines), ephemeral=True, view=confirm_view)
         confirm_view.message = await interaction.original_response()
 
-    async def _confirm_delete(self, selected_tasks):
+    async def _confirm_delete(self, selected_tasks, interaction):
         await run_blocking(delete_tasks_bulk, [task["id"] for task in selected_tasks])
         await run_blocking(load_tasks)
+        await send_delete_log(selected_tasks, interaction.user.display_name)
 
     @discord.ui.button(label="前へ", style=discord.ButtonStyle.secondary, row=1)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -980,7 +1013,7 @@ async def add(
         ),
         allowed_mentions=discord.AllowedMentions.none(),
     )
-    await send_task_notification(
+    await send_task_notification_with_mentions(
         {
             "task": task_name,
             "due": due,
@@ -990,6 +1023,7 @@ async def add(
             "guild_id": interaction.guild.id,
         },
         f"Task added: {task_name}\nDue: {due.strftime('%m/%d %H:%M')}",
+        allowed_mentions_override=discord.AllowedMentions.none(),
     )
     asyncio.create_task(run_blocking(load_tasks))
 
@@ -1261,9 +1295,10 @@ async def delete_bulk(
         await interaction.edit_original_response(content="対象タスクがありません")
         return
 
-    async def do_delete(tasks_to_delete):
+    async def do_delete(tasks_to_delete, interaction_for_log):
         await run_blocking(delete_tasks_bulk, [task["id"] for task in tasks_to_delete])
         await run_blocking(load_tasks)
+        await send_delete_log(tasks_to_delete, interaction_for_log.user.display_name)
 
     view = BulkActionConfirmView("削除", target_tasks, do_delete)
     lines = [f"{len(target_tasks)}件削除します。実行しますか？"]
@@ -1301,7 +1336,7 @@ async def status_bulk(
         await interaction.edit_original_response(content="対象タスクがありません")
         return
 
-    async def do_status(tasks_to_apply):
+    async def do_status(tasks_to_apply, _interaction):
         await run_blocking(update_status_bulk, [task["id"] for task in tasks_to_apply], status)
         await run_blocking(load_tasks)
 
@@ -1313,6 +1348,63 @@ async def status_bulk(
         lines.append("...")
     await interaction.edit_original_response(content="\n".join(lines), view=view)
     view.message = await interaction.original_response()
+
+
+@tree.command(name="help", description="コマンド一覧")
+async def help_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        content=(
+            "利用できるコマンド\n"
+            "/add タスク追加\n"
+            "/tasks UI で操作\n"
+            "/delete ID指定で削除\n"
+            "/delete_bulk 条件で一括削除\n"
+            "/status 状態変更"
+        ),
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
+@tree.command(name="search", description="キーワードでタスク検索")
+async def search_tasks(
+    interaction: discord.Interaction,
+    keyword: str,
+    channel: Optional[discord.TextChannel] = None,
+    mine_only: bool = False,
+):
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    await interaction.response.send_message("検索中...", ephemeral=True)
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    candidates = get_filtered_tasks_for_user(
+        interaction.guild.id,
+        interaction.user.id,
+        manager,
+        channel_id=channel.id if channel else None,
+        mine_only=mine_only,
+    )
+
+    keyword_lower = keyword.strip().lower()
+    results = [task for task in candidates if keyword_lower in str(task["task"]).lower()]
+
+    if not results:
+        await interaction.edit_original_response(content="一致するタスクはありません")
+        return
+
+    lines = [f"検索結果: {len(results)}件"]
+    for task in results[:20]:
+        lines.append(format_task_choice_name(task))
+    if len(results) > 20:
+        lines.append("...")
+
+    await interaction.edit_original_response(
+        content="\n".join(lines),
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 @tree.command(name="list", description="タスク一覧")
