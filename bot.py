@@ -417,10 +417,6 @@ async def get_accessible_autocomplete_tasks(interaction: discord.Interaction):
     if not interaction.guild:
         return []
 
-    try:
-        await run_blocking(load_tasks)
-    except Exception as e:
-        print("[autocomplete] load_tasks error:", e)
     manager = is_manager(interaction)
     return get_filtered_tasks_for_user(interaction.guild.id, interaction.user.id, manager)
 
