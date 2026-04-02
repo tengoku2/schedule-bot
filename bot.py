@@ -328,6 +328,49 @@ def update_status(task_id, status):
     db.close()
 
 
+def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders):
+    lock_name = f"schedule-bot:add:{interaction_id}"
+    db, cursor = get_cursor()
+    try:
+        cursor.execute("SELECT GET_LOCK(%s, 0) AS locked", (lock_name,))
+        row = cursor.fetchone()
+        if not row or row.get("locked") != 1:
+            return False
+
+        cursor.execute(
+            """
+            INSERT INTO tasks
+            (task, due, channel_id, notify_channel_id, owner_id, visible_to, roles,
+             reminders, notified, mention, everyone, status, guild_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                task_name,
+                due,
+                channel_id,
+                notify_channel_id,
+                user_id,
+                json.dumps([]),
+                json.dumps([]),
+                json.dumps(reminders),
+                json.dumps([]),
+                False,
+                False,
+                "todo",
+                guild_id,
+            ),
+        )
+        db.commit()
+        return True
+    finally:
+        try:
+            cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+            cursor.fetchall()
+        except Exception:
+            pass
+        db.close()
+
+
 def update_status_bulk(task_ids, status):
     if not task_ids:
         return
@@ -985,8 +1028,9 @@ async def add(
             filtered.append({"label": label, "days": days})
 
     try:
-        await run_blocking(
-            insert_task,
+        inserted = await run_blocking(
+            insert_task_once,
+            interaction.id,
             task_name,
             due,
             interaction.channel.id,
@@ -998,6 +1042,13 @@ async def add(
     except Exception as e:
         print("[add] db error:", e)
         await interaction.edit_original_response(content="DBエラー")
+        return
+
+    if inserted is not True:
+        await interaction.edit_original_response(
+            content="この追加操作はすでに処理されています",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
         return
 
     reminder_text = ", ".join(label_to_text(r["label"]) for r in filtered) if filtered else "なし"
@@ -1359,7 +1410,8 @@ async def help_cmd(interaction: discord.Interaction):
             "/tasks UI で操作\n"
             "/delete ID指定で削除\n"
             "/delete_bulk 条件で一括削除\n"
-            "/status 状態変更"
+            "/status 状態変更\n"
+            "/search キーワード検索"
         ),
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
