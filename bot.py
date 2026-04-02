@@ -298,6 +298,21 @@ def update_status(task_id, status):
     db.close()
 
 
+def update_status_bulk(task_ids, status):
+    if not task_ids:
+        return
+    db, cursor = get_cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(task_ids))
+        cursor.execute(
+            f"UPDATE tasks SET status=%s WHERE id IN ({placeholders})",
+            tuple([status] + list(task_ids)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def clear_notified(task_id):
     db, cursor = get_cursor()
     cursor.execute("UPDATE tasks SET notified=%s WHERE id=%s", (json.dumps([]), task_id))
@@ -317,6 +332,18 @@ def delete_task(task_id):
     cursor.execute("DELETE FROM tasks WHERE id=%s", (task_id,))
     db.commit()
     db.close()
+
+
+def delete_tasks_bulk(task_ids):
+    if not task_ids:
+        return
+    db, cursor = get_cursor()
+    try:
+        placeholders = ",".join(["%s"] * len(task_ids))
+        cursor.execute(f"DELETE FROM tasks WHERE id IN ({placeholders})", tuple(task_ids))
+        db.commit()
+    finally:
+        db.close()
 
 
 def parse_task_ids(task_ids_text):
@@ -351,6 +378,24 @@ def filter_accessible_tasks(task_ids, user_id, manager):
     return found_tasks, missing_ids, forbidden_ids
 
 
+def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, status=None, mine_only=False):
+    filtered = []
+    for task in tasks_list:
+        if task["guild_id"] != guild_id:
+            continue
+        if channel_id is not None and task["channel_id"] != channel_id:
+            continue
+        if status and task["status"] != status:
+            continue
+        if mine_only or not manager:
+            if task["owner_id"] != user_id:
+                continue
+        filtered.append(task)
+
+    filtered.sort(key=lambda task: (task["status"] == "done", task["due"], task["id"]))
+    return filtered
+
+
 def format_task_choice_name(task):
     due = task["due"]
     if due.tzinfo is None:
@@ -374,17 +419,7 @@ async def get_accessible_autocomplete_tasks(interaction: discord.Interaction):
 
     await run_blocking(load_tasks)
     manager = is_manager(interaction)
-
-    visible = []
-    for task in tasks_list:
-        if task["guild_id"] != interaction.guild.id:
-            continue
-        if interaction.user.id != task["owner_id"] and not manager:
-            continue
-        visible.append(task)
-
-    visible.sort(key=lambda task: (task.get("status") == "done", task["due"], task["id"]))
-    return visible
+    return get_filtered_tasks_for_user(interaction.guild.id, interaction.user.id, manager)
 
 
 def filter_task_choices(tasks, query):
@@ -607,6 +642,198 @@ class BulkDeleteConfirmView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Cancelled", view=None)
+
+
+class BulkActionConfirmView(discord.ui.View):
+    def __init__(self, action_name, tasks_to_apply, callback):
+        super().__init__(timeout=30)
+        self.action_name = action_name
+        self.tasks_to_apply = tasks_to_apply
+        self.callback = callback
+        self.message = None
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="はい", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content=f"{self.action_name}中...", view=None)
+        try:
+            await self.callback(self.tasks_to_apply)
+        except Exception as e:
+            print("[bulk_action] error:", e)
+            await interaction.followup.send(f"{self.action_name}に失敗しました", ephemeral=True)
+            return
+        await interaction.followup.send(f"{len(self.tasks_to_apply)}件{self.action_name}しました", ephemeral=True)
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="キャンセルしました", view=None)
+
+
+class TaskPickerSelect(discord.ui.Select):
+    def __init__(self, parent_view, tasks_page):
+        self.parent_view = parent_view
+        self.tasks_page = tasks_page
+        options = [
+            discord.SelectOption(label=format_task_choice_name(task), value=str(task["id"]))
+            for task in tasks_page
+        ]
+        super().__init__(
+            placeholder="タスクを選択",
+            min_values=0,
+            max_values=max(1, len(options)),
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        page_task_ids = {task["id"] for task in self.tasks_page}
+        self.parent_view.selected_ids.difference_update(page_task_ids)
+        self.parent_view.selected_ids.update(int(value) for value in self.values)
+        await interaction.response.edit_message(
+            content=self.parent_view.render_content(),
+            view=self.parent_view.rebuild(),
+        )
+
+
+class TaskActionsView(discord.ui.View):
+    def __init__(self, tasks_for_ui, owner_user_id, manager):
+        super().__init__(timeout=180)
+        self.tasks_for_ui = tasks_for_ui
+        self.owner_user_id = owner_user_id
+        self.manager = manager
+        self.page = 0
+        self.selected_ids = set()
+        self.message = None
+        self._apply_components()
+
+    def current_page_tasks(self):
+        start = self.page * 25
+        end = start + 25
+        return self.tasks_for_ui[start:end]
+
+    def total_pages(self):
+        if not self.tasks_for_ui:
+            return 1
+        return (len(self.tasks_for_ui) - 1) // 25 + 1
+
+    def selected_tasks(self):
+        selected = [task for task in self.tasks_for_ui if task["id"] in self.selected_ids]
+        selected.sort(key=lambda task: task["id"])
+        return selected
+
+    def render_content(self):
+        page_tasks = self.current_page_tasks()
+        lines = [
+            f"タスク操作 UI ({self.page + 1}/{self.total_pages()})",
+            f"選択中: {len(self.selected_ids)}件",
+            "",
+        ]
+        if not page_tasks:
+            lines.append("対象タスクがありません")
+            return "\n".join(lines)
+
+        for task in page_tasks:
+            marker = "☑" if task["id"] in self.selected_ids else "☐"
+            lines.append(f"{marker} {format_task_choice_name(task)}")
+        return "\n".join(lines)
+
+    def _apply_components(self):
+        self.clear_items()
+        page_tasks = self.current_page_tasks()
+        if page_tasks:
+            self.add_item(TaskPickerSelect(self, page_tasks))
+        self.add_item(self.prev_button)
+        self.add_item(self.next_button)
+        self.add_item(self.todo_button)
+        self.add_item(self.done_button)
+        self.add_item(self.delete_button)
+        self.prev_button.disabled = self.page <= 0
+        self.next_button.disabled = self.page >= self.total_pages() - 1
+        no_selection = not self.selected_ids
+        self.todo_button.disabled = no_selection
+        self.done_button.disabled = no_selection
+        self.delete_button.disabled = no_selection
+
+    def rebuild(self):
+        self._apply_components()
+        return self
+
+    async def _run_status(self, interaction, status):
+        selected_tasks = self.selected_tasks()
+        if not selected_tasks:
+            await interaction.response.send_message("タスクを選択してください", ephemeral=True)
+            return
+
+        try:
+            await run_blocking(update_status_bulk, [task["id"] for task in selected_tasks], status)
+            await run_blocking(load_tasks)
+        except Exception as e:
+            print("[tasks_ui status] error:", e)
+            await interaction.response.send_message("更新に失敗しました", ephemeral=True)
+            return
+
+        self.tasks_for_ui = get_filtered_tasks_for_user(
+            interaction.guild.id,
+            self.owner_user_id,
+            self.manager,
+        )
+        self.selected_ids.clear()
+        self.page = min(self.page, self.total_pages() - 1)
+        await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+
+    async def _run_delete(self, interaction):
+        selected_tasks = self.selected_tasks()
+        if not selected_tasks:
+            await interaction.response.send_message("タスクを選択してください", ephemeral=True)
+            return
+
+        confirm_view = BulkActionConfirmView(
+            "削除",
+            selected_tasks,
+            self._confirm_delete,
+        )
+        lines = [f"{len(selected_tasks)}件削除します。実行しますか？"]
+        for task in selected_tasks[:10]:
+            lines.append(format_task_choice_name(task))
+        if len(selected_tasks) > 10:
+            lines.append("...")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True, view=confirm_view)
+        confirm_view.message = await interaction.original_response()
+
+    async def _confirm_delete(self, selected_tasks):
+        await run_blocking(delete_tasks_bulk, [task["id"] for task in selected_tasks])
+        await run_blocking(load_tasks)
+
+    @discord.ui.button(label="前へ", style=discord.ButtonStyle.secondary, row=1)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+
+    @discord.ui.button(label="次へ", style=discord.ButtonStyle.secondary, row=1)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.total_pages() - 1:
+            self.page += 1
+        await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+
+    @discord.ui.button(label="未完了", style=discord.ButtonStyle.primary, row=1)
+    async def todo_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run_status(interaction, "todo")
+
+    @discord.ui.button(label="完了", style=discord.ButtonStyle.success, row=1)
+    async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run_status(interaction, "done")
+
+    @discord.ui.button(label="削除", style=discord.ButtonStyle.danger, row=1)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run_delete(interaction)
 
 
 @tree.command(name="status", description="Update task status")
@@ -936,6 +1163,116 @@ async def edit_task_id_autocomplete(interaction: discord.Interaction, current: s
 @edit_task_cmd.autocomplete("dt_str")
 async def edit_dt_autocomplete(interaction: discord.Interaction, current: str):
     return await add_dt_autocomplete(interaction, current)
+
+
+@tree.command(name="tasks", description="タスクを UI で操作")
+async def tasks_ui(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+    status: Optional[Literal["todo", "done"]] = None,
+    mine_only: bool = False,
+):
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    await interaction.response.send_message("読み込み中...", ephemeral=True)
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    source_channel_id = channel.id if channel else None
+    filtered_tasks = get_filtered_tasks_for_user(
+        interaction.guild.id,
+        interaction.user.id,
+        manager,
+        channel_id=source_channel_id,
+        status=status,
+        mine_only=mine_only,
+    )
+
+    view = TaskActionsView(filtered_tasks, interaction.user.id, manager)
+    await interaction.edit_original_response(content=view.render_content(), view=view)
+    view.message = await interaction.original_response()
+
+
+@tree.command(name="delete_bulk", description="条件に一致するタスクを一括削除")
+async def delete_bulk(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+    status: Optional[Literal["todo", "done"]] = None,
+    mine_only: bool = False,
+):
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    await interaction.response.send_message("対象を確認中...", ephemeral=True)
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    target_tasks = get_filtered_tasks_for_user(
+        interaction.guild.id,
+        interaction.user.id,
+        manager,
+        channel_id=channel.id if channel else None,
+        status=status,
+        mine_only=mine_only,
+    )
+
+    if not target_tasks:
+        await interaction.edit_original_response(content="対象タスクがありません")
+        return
+
+    async def do_delete(tasks_to_delete):
+        await run_blocking(delete_tasks_bulk, [task["id"] for task in tasks_to_delete])
+        await run_blocking(load_tasks)
+
+    view = BulkActionConfirmView("削除", target_tasks, do_delete)
+    lines = [f"{len(target_tasks)}件削除します。実行しますか？"]
+    for task in target_tasks[:10]:
+        lines.append(format_task_choice_name(task))
+    if len(target_tasks) > 10:
+        lines.append("...")
+    await interaction.edit_original_response(content="\n".join(lines), view=view)
+    view.message = await interaction.original_response()
+
+
+@tree.command(name="status_bulk", description="条件に一致するタスクを一括更新")
+async def status_bulk(
+    interaction: discord.Interaction,
+    status: Literal["todo", "done"],
+    channel: Optional[discord.TextChannel] = None,
+    mine_only: bool = False,
+):
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
+        return
+
+    await interaction.response.send_message("対象を確認中...", ephemeral=True)
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    target_tasks = get_filtered_tasks_for_user(
+        interaction.guild.id,
+        interaction.user.id,
+        manager,
+        channel_id=channel.id if channel else None,
+        mine_only=mine_only,
+    )
+
+    if not target_tasks:
+        await interaction.edit_original_response(content="対象タスクがありません")
+        return
+
+    async def do_status(tasks_to_apply):
+        await run_blocking(update_status_bulk, [task["id"] for task in tasks_to_apply], status)
+        await run_blocking(load_tasks)
+
+    view = BulkActionConfirmView(f"status を {status} に変更", target_tasks, do_status)
+    lines = [f"{len(target_tasks)}件を {status} に変更します。実行しますか？"]
+    for task in target_tasks[:10]:
+        lines.append(format_task_choice_name(task))
+    if len(target_tasks) > 10:
+        lines.append("...")
+    await interaction.edit_original_response(content="\n".join(lines), view=view)
+    view.message = await interaction.original_response()
 
 
 @tree.command(name="list", description="タスク一覧")

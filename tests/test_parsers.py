@@ -91,6 +91,33 @@ class TaskChoiceFormattingTests(unittest.TestCase):
         self.assertEqual(bot.filter_task_choices(tasks, "レビュー")[0]["id"], 34)
 
 
+class FilteredTasksTests(unittest.TestCase):
+    def test_get_filtered_tasks_for_user_respects_channel_status_and_mine_only(self):
+        original = bot.tasks_list
+        try:
+            bot.tasks_list = [
+                {"id": 1, "task": "a", "guild_id": 100, "channel_id": 10, "owner_id": 5, "status": "todo", "due": datetime.datetime(2026, 4, 3, 9, 0)},
+                {"id": 2, "task": "b", "guild_id": 100, "channel_id": 10, "owner_id": 6, "status": "done", "due": datetime.datetime(2026, 4, 4, 9, 0)},
+                {"id": 3, "task": "c", "guild_id": 100, "channel_id": 11, "owner_id": 5, "status": "todo", "due": datetime.datetime(2026, 4, 5, 9, 0)},
+            ]
+            tasks = bot.get_filtered_tasks_for_user(100, 5, False, channel_id=10, status="todo", mine_only=False)
+            self.assertEqual([task["id"] for task in tasks], [1])
+        finally:
+            bot.tasks_list = original
+
+    def test_get_filtered_tasks_for_user_allows_manager_scope(self):
+        original = bot.tasks_list
+        try:
+            bot.tasks_list = [
+                {"id": 1, "task": "a", "guild_id": 100, "channel_id": 10, "owner_id": 5, "status": "todo", "due": datetime.datetime(2026, 4, 3, 9, 0)},
+                {"id": 2, "task": "b", "guild_id": 100, "channel_id": 10, "owner_id": 6, "status": "todo", "due": datetime.datetime(2026, 4, 4, 9, 0)},
+            ]
+            tasks = bot.get_filtered_tasks_for_user(100, 5, True, channel_id=10, status="todo", mine_only=False)
+            self.assertEqual([task["id"] for task in tasks], [1, 2])
+        finally:
+            bot.tasks_list = original
+
+
 class NotificationRoutingTests(unittest.TestCase):
     @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
     def test_resolve_notification_channel_prefers_task_channel(self, _mock_settings):
