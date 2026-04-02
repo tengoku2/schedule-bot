@@ -351,6 +351,54 @@ def filter_accessible_tasks(task_ids, user_id, manager):
     return found_tasks, missing_ids, forbidden_ids
 
 
+def format_task_choice_name(task):
+    due = task["due"]
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=JST)
+
+    task_name = str(task["task"]).replace("\n", " ").strip()
+    label = f"[{task['id']}] {task_name}（{due.strftime('%m/%d %H:%M')}）"
+    if len(label) <= 100:
+        return label
+
+    suffix = f"（{due.strftime('%m/%d %H:%M')}）"
+    prefix = f"[{task['id']}] "
+    max_task_len = max(0, 100 - len(prefix) - len(suffix) - 1)
+    shortened = task_name[:max_task_len] + "…" if max_task_len < len(task_name) else task_name
+    return f"{prefix}{shortened}{suffix}"
+
+
+async def get_accessible_autocomplete_tasks(interaction: discord.Interaction):
+    if not interaction.guild:
+        return []
+
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+
+    visible = []
+    for task in tasks_list:
+        if task["guild_id"] != interaction.guild.id:
+            continue
+        if interaction.user.id != task["owner_id"] and not manager:
+            continue
+        visible.append(task)
+
+    visible.sort(key=lambda task: (task.get("status") == "done", task["due"], task["id"]))
+    return visible
+
+
+def filter_task_choices(tasks, query):
+    query = (query or "").strip().lower()
+    if not query:
+        return tasks[:25]
+
+    matched = []
+    for task in tasks:
+        if query in str(task["id"]).lower() or query in str(task["task"]).lower():
+            matched.append(task)
+    return matched[:25]
+
+
 def is_manager(interaction):
     try:
         settings = get_guild_settings(interaction.guild.id)
@@ -619,7 +667,11 @@ async def add(
     print("[add] source_channel:", interaction.channel.id if interaction.channel else None)
     print("[add] notify_channel_arg:", channel.id if channel else None)
     try:
-        await interaction.response.send_message("追加中...", ephemeral=True)
+        await interaction.response.send_message(
+            "追加中...",
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     except Exception:
         pass
 
@@ -669,7 +721,8 @@ async def add(
             f"🕒 {due.strftime('%m/%d %H:%M')}\n"
             f"🔔 {reminder_text}\n"
             f"📢 {channel_text}"
-        )
+        ),
+        allowed_mentions=discord.AllowedMentions.none(),
     )
     await send_task_notification(
         {
@@ -759,16 +812,55 @@ async def delete_task_cmd(interaction: discord.Interaction, task_ids: str):
     view.message = await interaction.original_response()
 
 
+@delete_task_cmd.autocomplete("task_ids")
+async def delete_task_ids_autocomplete(interaction: discord.Interaction, current: str):
+    tasks = await get_accessible_autocomplete_tasks(interaction)
+
+    raw = current or ""
+    parts = [part.strip() for part in raw.split(",")]
+    prefix_parts = parts[:-1]
+    current_part = parts[-1] if parts else ""
+    selected_ids = {part for part in prefix_parts if part.isdigit()}
+
+    choices = []
+    for task in filter_task_choices(tasks, current_part):
+        task_id_text = str(task["id"])
+        if task_id_text in selected_ids:
+            continue
+
+        choice_value_parts = prefix_parts + [task_id_text]
+        choice_value = ",".join(part for part in choice_value_parts if part)
+        if raw.endswith(","):
+            choice_value = raw + task_id_text
+
+        choices.append(
+            app_commands.Choice(
+                name=format_task_choice_name(task),
+                value=choice_value,
+            )
+        )
+        if len(choices) >= 25:
+            break
+
+    return choices
+
+
 @tree.command(name="edit", description="タスク編集")
 async def edit_task_cmd(
     interaction: discord.Interaction,
-    task_id: int,
+    task_id: str,
     task_name: str = None,
     dt_str: str = None,
     reminders: str = None,
     channel: Optional[discord.TextChannel] = None,
 ):
-    print("[edit] start", task_id)
+    try:
+        parsed_task_id = int(task_id)
+    except ValueError:
+        await interaction.response.send_message("task_id は数値で入力してください", ephemeral=True)
+        return
+
+    print("[edit] start", parsed_task_id)
     print("[edit] guild:", interaction.guild.id if interaction.guild else None)
     print("[edit] source_channel:", interaction.channel.id if interaction.channel else None)
     print("[edit] notify_channel_arg:", channel.id if channel else None)
@@ -778,7 +870,7 @@ async def edit_task_cmd(
         pass
 
     await run_blocking(load_tasks)
-    task = next((t for t in tasks_list if t["id"] == task_id), None)
+    task = next((t for t in tasks_list if t["id"] == parsed_task_id), None)
     if not task:
         await interaction.edit_original_response(content="タスクが見つからない")
         return
@@ -824,12 +916,21 @@ async def edit_task_cmd(
     await interaction.edit_original_response(
         content=(
             f"Updated\n"
-            f"[{task_id}] {new_name}\n"
+            f"[{parsed_task_id}] {new_name}\n"
             f"{new_due.strftime('%m/%d %H:%M')}\n"
             f"reminders: {reminder_text}\n"
             f"channel: {channel_text}"
         )
     )
+
+
+@edit_task_cmd.autocomplete("task_id")
+async def edit_task_id_autocomplete(interaction: discord.Interaction, current: str):
+    tasks = await get_accessible_autocomplete_tasks(interaction)
+    return [
+        app_commands.Choice(name=format_task_choice_name(task), value=str(task["id"]))
+        for task in filter_task_choices(tasks, current)
+    ]
 
 
 @edit_task_cmd.autocomplete("dt_str")

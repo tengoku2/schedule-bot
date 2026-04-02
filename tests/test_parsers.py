@@ -70,6 +70,27 @@ class ParseTaskIdsTests(unittest.TestCase):
             bot.parse_task_ids("1,a")
 
 
+class TaskChoiceFormattingTests(unittest.TestCase):
+    def test_format_task_choice_name(self):
+        task = {
+            "id": 12,
+            "task": "資料作成",
+            "due": datetime.datetime(2026, 4, 3, 9, 30),
+        }
+        self.assertEqual(
+            bot.format_task_choice_name(task),
+            "[12] 資料作成（04/03 09:30）",
+        )
+
+    def test_filter_task_choices_matches_id_and_name(self):
+        tasks = [
+            {"id": 12, "task": "資料作成"},
+            {"id": 34, "task": "レビュー対応"},
+        ]
+        self.assertEqual(bot.filter_task_choices(tasks, "12")[0]["id"], 12)
+        self.assertEqual(bot.filter_task_choices(tasks, "レビュー")[0]["id"], 34)
+
+
 class NotificationRoutingTests(unittest.TestCase):
     @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
     def test_resolve_notification_channel_prefers_task_channel(self, _mock_settings):
