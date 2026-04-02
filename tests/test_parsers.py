@@ -51,6 +51,15 @@ class ParseRemindersTests(unittest.TestCase):
         self.assertEqual(parsed, [("1day", 1), ("3hour", 3 / 24)])
 
 
+class ParseTaskIdsTests(unittest.TestCase):
+    def test_parse_task_ids(self):
+        self.assertEqual(bot.parse_task_ids("1,2, 3"), [1, 2, 3])
+
+    def test_parse_task_ids_rejects_invalid(self):
+        with self.assertRaises(ValueError):
+            bot.parse_task_ids("1,a")
+
+
 class NotificationRoutingTests(unittest.TestCase):
     @patch("bot.get_guild_settings", return_value={"notify_channel_id": 200, "manager_role_id": 300})
     def test_resolve_notification_channel_prefers_task_channel(self, _mock_settings):

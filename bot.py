@@ -304,6 +304,38 @@ def delete_task(task_id):
     db.close()
 
 
+def parse_task_ids(task_ids_text):
+    # 複数指定は 1,2,5 のようなカンマ区切りを想定する。
+    # 空要素や数値以外はエラーにする。
+    ids = []
+    for part in task_ids_text.split(","):
+        value = part.strip()
+        if not value:
+            raise ValueError("empty task id")
+        if not value.isdigit():
+            raise ValueError("invalid task id")
+        ids.append(int(value))
+    return ids
+
+
+def filter_accessible_tasks(task_ids, user_id, manager):
+    found_tasks = []
+    missing_ids = []
+    forbidden_ids = []
+
+    for task_id in task_ids:
+        task = next((t for t in tasks_list if t["id"] == task_id), None)
+        if not task:
+            missing_ids.append(task_id)
+            continue
+        if user_id != task["owner_id"] and not manager:
+            forbidden_ids.append(task_id)
+            continue
+        found_tasks.append(task)
+
+    return found_tasks, missing_ids, forbidden_ids
+
+
 def is_manager(interaction):
     try:
         settings = get_guild_settings(interaction.guild.id)
@@ -419,29 +451,83 @@ class DeleteConfirmView(discord.ui.View):
         await interaction.response.edit_message(content="キャンセルしました", view=None)
 
 
-@tree.command(name="status", description="タスク状態変更")
+class BulkDeleteConfirmView(discord.ui.View):
+    def __init__(self, tasks_to_delete):
+        super().__init__(timeout=30)
+        self.tasks_to_delete = tasks_to_delete
+        self.message = None
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="????????", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="???...", view=None)
+        try:
+            for task in self.tasks_to_delete:
+                await run_blocking(delete_task, task["id"])
+            await run_blocking(load_tasks)
+        except Exception as e:
+            print("[bulk_delete] error:", e)
+            await interaction.followup.send("??????", ephemeral=True)
+            return
+        deleted_ids = ", ".join(f"[{task['id']}]" for task in self.tasks_to_delete)
+        await interaction.followup.send(f"??: {deleted_ids}", ephemeral=True)
+
+    @discord.ui.button(label="?????", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="?????????", view=None)
+
+
+@tree.command(name="status", description="???????")
 async def status_cmd(
     interaction: discord.Interaction,
-    task_id: int,
+    task_ids: str,
     status: Literal["todo", "done"],
 ):
-    await interaction.response.send_message("更新中...", ephemeral=True)
-    await run_blocking(load_tasks)
-    task = next((t for t in tasks_list if t["id"] == task_id), None)
-    if not task:
-        await interaction.edit_original_response(content="タスクが見つからない")
-        return
-    if not (interaction.user.id == task["owner_id"] or is_manager(interaction)):
-        await interaction.edit_original_response(content="権限がありません")
-        return
+    await interaction.response.send_message("???...", ephemeral=True)
+
     try:
-        await run_blocking(update_status, task_id, status)
+        parsed_ids = parse_task_ids(task_ids)
+    except ValueError:
+        await interaction.edit_original_response(content="task_id ? 1,2,3 ????????????")
+        return
+
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    target_tasks, missing_ids, forbidden_ids = filter_accessible_tasks(parsed_ids, interaction.user.id, manager)
+
+    if not target_tasks:
+        messages = []
+        if missing_ids:
+            messages.append(f"??????ID: {', '.join(map(str, missing_ids))}")
+        if forbidden_ids:
+            messages.append(f"????ID: {', '.join(map(str, forbidden_ids))}")
+        await interaction.edit_original_response(content="\\n".join(messages) if messages else "更新対象なし")
+        return
+
+    try:
+        for task in target_tasks:
+            await run_blocking(update_status, task["id"], status)
         await run_blocking(load_tasks)
     except Exception as e:
         print("[status] error:", e)
-        await interaction.edit_original_response(content="更新失敗")
+        await interaction.edit_original_response(content="????")
         return
-    await interaction.edit_original_response(content=f"状態更新\n[{task_id}] {task['task']} -> {status}")
+
+    updated_ids = ", ".join(f"[{task['id']}]" for task in target_tasks)
+    messages = [f"状態更新: {updated_ids} -> {status}"]
+    if missing_ids:
+        messages.append(f"??????ID: {', '.join(map(str, missing_ids))}")
+    if forbidden_ids:
+        messages.append(f"????ID: {', '.join(map(str, forbidden_ids))}")
+    await interaction.edit_original_response(content="\\n".join(messages))
 
 
 @tree.command(name="add", description="タスク追加")
@@ -543,19 +629,45 @@ async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
 
 
 @tree.command(name="delete", description="タスク削除")
-async def delete_task_cmd(interaction: discord.Interaction, task_id: int):
+async def delete_task_cmd(interaction: discord.Interaction, task_ids: str):
     await interaction.response.defer(ephemeral=True)
-    await run_blocking(load_tasks)
-    task = next((t for t in tasks_list if t["id"] == task_id), None)
-    if not task:
-        await interaction.edit_original_response(content="タスクが見つからない")
-        return
-    if not (interaction.user.id == task["owner_id"] or is_manager(interaction)):
-        await interaction.edit_original_response(content="権限がありません")
+
+    try:
+        parsed_ids = parse_task_ids(task_ids)
+    except ValueError:
+        await interaction.edit_original_response(content="task_id は 1,2,3 の形式で入力してください")
         return
 
-    view = DeleteConfirmView(task)
-    await interaction.edit_original_response(content=f"削除しますか\n{task['task']}", view=view)
+    await run_blocking(load_tasks)
+    manager = is_manager(interaction)
+    target_tasks, missing_ids, forbidden_ids = filter_accessible_tasks(parsed_ids, interaction.user.id, manager)
+
+    if not target_tasks:
+        messages = []
+        if missing_ids:
+            messages.append(f"見つからないID: {', '.join(map(str, missing_ids))}")
+        if forbidden_ids:
+            messages.append(f"権限なしID: {', '.join(map(str, forbidden_ids))}")
+        await interaction.edit_original_response(content="\\n".join(messages) if messages else "削除対象なし")
+        return
+
+    if len(target_tasks) == 1:
+        task = target_tasks[0]
+        view = DeleteConfirmView(task)
+        await interaction.edit_original_response(content=f"削除しますか\\n[{task['id']}] {task['task']}", view=view)
+        view.message = await interaction.original_response()
+        return
+
+    lines = ["以下をまとめて削除しますか"]
+    for task in target_tasks:
+        lines.append(f"[{task['id']}] {task['task']}")
+    if missing_ids:
+        lines.append(f"見つからないID: {', '.join(map(str, missing_ids))}")
+    if forbidden_ids:
+        lines.append(f"権限なしID: {', '.join(map(str, forbidden_ids))}")
+
+    view = BulkDeleteConfirmView(target_tasks)
+    await interaction.edit_original_response(content="\\n".join(lines), view=view)
     view.message = await interaction.original_response()
 
 
