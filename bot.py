@@ -664,6 +664,43 @@ async def send_delete_log(tasks_for_log, executor_name):
         )
 
 
+def format_done_log_message(executor_name, tasks_for_log):
+    count = len(tasks_for_log)
+    lines = [
+        "✅【完了】",
+        f"実行者: {executor_name}",
+        f"{count}件完了",
+    ]
+
+    for task in tasks_for_log[:10]:
+        due = task["due"]
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=JST)
+        lines.append(f"[{task['id']}] {task['task']} ({due.strftime('%m/%d %H:%M')})")
+
+    if count > 10:
+        lines.append("...")
+
+    return "\n".join(lines)
+
+
+async def send_done_log(tasks_for_log, executor_name):
+    if not tasks_for_log:
+        return
+
+    grouped = {}
+    for task in tasks_for_log:
+        channel_id = resolve_notification_channel_id(task)
+        grouped.setdefault(channel_id, []).append(task)
+
+    for grouped_tasks in grouped.values():
+        await send_task_notification_with_mentions(
+            grouped_tasks[0],
+            format_done_log_message(executor_name, grouped_tasks),
+            allowed_mentions_override=discord.AllowedMentions.none(),
+        )
+
+
 def format_due_message(task, due):
     return (
         "⏰【期限】\n"
@@ -893,10 +930,12 @@ class TaskActionsView(discord.ui.View):
 
         await interaction.response.defer()
         updated_ids = ", ".join(f"[{task['id']}]" for task in selected_tasks)
+        done_log_targets = [task for task in selected_tasks if task["status"] == "todo" and status == "done"]
 
         try:
             await run_blocking(update_status_bulk, [task["id"] for task in selected_tasks], status)
             await run_blocking(load_tasks)
+            await send_done_log(done_log_targets, interaction.user.display_name)
         except Exception as e:
             print("[tasks_ui status] error:", e)
             await interaction.followup.send("更新に失敗しました", ephemeral=True)
@@ -995,10 +1034,12 @@ async def status_cmd(
         await interaction.edit_original_response(content="\n".join(messages) if messages else "No matching tasks")
         return
 
+    done_log_targets = [task for task in target_tasks if task["status"] == "todo" and status == "done"]
     try:
         for task in target_tasks:
             await run_blocking(update_status, task["id"], status)
         await run_blocking(load_tasks)
+        await send_done_log(done_log_targets, interaction.user.display_name)
     except Exception as e:
         print("[status] error:", e)
         await interaction.edit_original_response(content="Update failed")
@@ -1460,9 +1501,11 @@ async def status_bulk(
         await interaction.edit_original_response(content="対象タスクがありません")
         return
 
-    async def do_status(tasks_to_apply, _interaction):
+    async def do_status(tasks_to_apply, interaction_for_log):
         await run_blocking(update_status_bulk, [task["id"] for task in tasks_to_apply], status)
         await run_blocking(load_tasks)
+        done_log_targets = [task for task in tasks_to_apply if task["status"] == "todo" and status == "done"]
+        await send_done_log(done_log_targets, interaction_for_log.user.display_name)
 
     view = BulkActionConfirmView(f"status を {status} に変更", target_tasks, do_status)
     lines = [f"{len(target_tasks)}件を {status} に変更します。実行しますか？"]
