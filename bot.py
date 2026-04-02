@@ -1364,7 +1364,7 @@ async def tasks_ui(
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
         return
 
-    await interaction.response.send_message("読み込み中...", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
     await run_blocking(load_tasks)
     manager = is_manager(interaction)
     source_channel_id = channel.id if channel else None
