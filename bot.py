@@ -693,12 +693,19 @@ async def send_done_log(tasks_for_log, executor_name):
         channel_id = resolve_notification_channel_id(task)
         grouped.setdefault(channel_id, []).append(task)
 
-    for grouped_tasks in grouped.values():
-        await send_task_notification_with_mentions(
-            grouped_tasks[0],
-            format_done_log_message(executor_name, grouped_tasks),
-            allowed_mentions_override=discord.AllowedMentions.none(),
-        )
+    for channel_id, grouped_tasks in grouped.items():
+        channel = await get_target_channel(channel_id)
+        if not channel:
+            print("[done_log] channel not found:", channel_id)
+            continue
+        try:
+            await channel.send(
+                format_done_log_message(executor_name, grouped_tasks),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            print("[done_log] sent:", channel_id, len(grouped_tasks))
+        except Exception as e:
+            print("[done_log] send error:", channel_id, e)
 
 
 def format_due_message(task, due):
