@@ -891,12 +891,14 @@ class TaskActionsView(discord.ui.View):
             await interaction.response.send_message("タスクを選択してください", ephemeral=True)
             return
 
+        await interaction.response.defer()
+
         try:
             await run_blocking(update_status_bulk, [task["id"] for task in selected_tasks], status)
             await run_blocking(load_tasks)
         except Exception as e:
             print("[tasks_ui status] error:", e)
-            await interaction.response.send_message("更新に失敗しました", ephemeral=True)
+            await interaction.followup.send("更新に失敗しました", ephemeral=True)
             return
 
         self.tasks_for_ui = get_filtered_tasks_for_user(
@@ -910,7 +912,7 @@ class TaskActionsView(discord.ui.View):
         self.selected_ids.clear()
         self.page = min(self.page, self.total_pages() - 1)
         try:
-            await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+            await interaction.message.edit(content=self.render_content(), view=self.rebuild())
         except Exception as e:
             print("[tasks_ui status] edit error:", e)
             await interaction.followup.send("更新は完了しました。UIの更新に失敗しました", ephemeral=True)
