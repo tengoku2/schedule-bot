@@ -193,6 +193,7 @@ def label_to_text(label):
 
 
 tasks_list = []
+guild_settings_cache = {}
 
 
 def load_tasks():
@@ -229,7 +230,34 @@ def load_tasks():
         print("[load_tasks] error:", e)
 
 
+def load_guild_settings_cache():
+    global guild_settings_cache
+    print("[load_guild_settings] start")
+    try:
+        db, cursor = get_cursor()
+        cursor.execute(
+            """
+            SELECT guild_id, manager_role_id, notify_channel_id
+            FROM guild_settings
+            """
+        )
+        rows = cursor.fetchall()
+        guild_settings_cache = {
+            row["guild_id"]: {
+                "manager_role_id": row.get("manager_role_id"),
+                "notify_channel_id": row.get("notify_channel_id"),
+            }
+            for row in rows
+        }
+        db.close()
+    except Exception as e:
+        print("[load_guild_settings] error:", e)
+
+
 def get_guild_settings(guild_id):
+    if guild_id in guild_settings_cache:
+        return guild_settings_cache[guild_id]
+
     db, cursor = get_cursor()
     cursor.execute(
         """
@@ -241,7 +269,9 @@ def get_guild_settings(guild_id):
     )
     row = cursor.fetchone()
     db.close()
-    return row or {}
+    settings = row or {}
+    guild_settings_cache[guild_id] = settings
+    return settings
 
 
 def get_notify_channel(guild_id):
@@ -1392,6 +1422,8 @@ async def keep_db_alive():
         cursor.fetchall()
         db.close()
         print("[db] keep alive")
+        if not guild_settings_cache:
+            load_guild_settings_cache()
     except Exception as e:
         print("[db] keep alive error:", e)
 
@@ -1416,6 +1448,10 @@ async def set_notify_channel(interaction: discord.Interaction, channel: discord.
     )
     db.commit()
     db.close()
+    guild_settings_cache[interaction.guild.id] = {
+        **get_guild_settings(interaction.guild.id),
+        "notify_channel_id": channel.id,
+    }
 
     await interaction.response.send_message(f"通知チャンネル設定: {channel.name}", ephemeral=True)
 
@@ -1446,6 +1482,10 @@ async def set_manager_role(interaction: discord.Interaction, role: discord.Role)
         )
         db.commit()
         db.close()
+        guild_settings_cache[interaction.guild.id] = {
+            **get_guild_settings(interaction.guild.id),
+            "manager_role_id": role.id,
+        }
     except Exception as e:
         print("[manager_role] error:", e)
         await interaction.edit_original_response(content="設定失敗")
@@ -1482,6 +1522,7 @@ async def on_ready():
         print("[startup] clear global commands error:", e)
 
     try:
+        await run_blocking(load_guild_settings_cache)
         await run_blocking(load_tasks)
     except Exception as e:
         print("[startup] initial load error:", e)
