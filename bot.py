@@ -414,6 +414,30 @@ async def send_task_notification(task, message):
     return True
 
 
+def format_due_message(task, due):
+    return (
+        "⏰【期限】\n"
+        f"📌 {task['task']}\n"
+        f"🕒 {due.strftime('%m/%d %H:%M')}"
+    )
+
+
+def format_reminder_message(task, due, label):
+    return (
+        f"🔔【リマインド（{label_to_text(label)}）】\n"
+        f"📌 {task['task']}\n"
+        f"🕒 {due.strftime('%m/%d %H:%M')}"
+    )
+
+
+def format_daily_message(task, due):
+    return (
+        "🌙【未完了タスク】\n"
+        f"📌 {task['task']}\n"
+        f"🕒 {due.strftime('%m/%d %H:%M')}（期限切れ）"
+    )
+
+
 intents = discord.Intents.default()
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
@@ -815,16 +839,22 @@ async def reminder_loop():
         notified = list(task.get("notified", []))
         today_str = now.strftime("%Y-%m-%d")
 
-        if task["status"] != "done" and now >= due and now.hour == 0 and now.minute == 0:
+        if (
+            task["status"] != "done"
+            and now > due
+            and now.date() > due.date()
+            and now.hour == 9
+            and now.minute == 0
+        ):
             if today_str not in notified:
-                await send_task_notification(task, f"Daily overdue task: {task['task']}")
+                await send_task_notification(task, format_daily_message(task, due))
                 notified.append(today_str)
                 await run_blocking(append_notified, task["id"], notified)
                 task["notified"] = notified
 
         notified = list(task.get("notified", []))
         if "due" not in notified and now >= due:
-            await send_task_notification(task, f"Task is due: {task['task']}")
+            await send_task_notification(task, format_due_message(task, due))
             notified.append("due")
             await run_blocking(append_notified, task["id"], notified)
             task["notified"] = notified
@@ -836,7 +866,7 @@ async def reminder_loop():
             if label in notified:
                 continue
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
-                await send_task_notification(task, f"Reminder ({label_to_text(label)}): {task['task']}")
+                await send_task_notification(task, format_reminder_message(task, due, label))
                 notified.append(label)
                 await run_blocking(append_notified, task["id"], notified)
                 task["notified"] = notified
