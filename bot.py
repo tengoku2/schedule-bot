@@ -466,37 +466,37 @@ class BulkDeleteConfirmView(discord.ui.View):
             except Exception:
                 pass
 
-    @discord.ui.button(label="????????", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Delete All", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="???...", view=None)
+        await interaction.response.edit_message(content="Deleting...", view=None)
         try:
             for task in self.tasks_to_delete:
                 await run_blocking(delete_task, task["id"])
             await run_blocking(load_tasks)
         except Exception as e:
             print("[bulk_delete] error:", e)
-            await interaction.followup.send("??????", ephemeral=True)
+            await interaction.followup.send("Bulk delete failed", ephemeral=True)
             return
         deleted_ids = ", ".join(f"[{task['id']}]" for task in self.tasks_to_delete)
-        await interaction.followup.send(f"??: {deleted_ids}", ephemeral=True)
+        await interaction.followup.send(f"Deleted: {deleted_ids}", ephemeral=True)
 
-    @discord.ui.button(label="?????", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="?????????", view=None)
+        await interaction.response.edit_message(content="Cancelled", view=None)
 
 
-@tree.command(name="status", description="???????")
+@tree.command(name="status", description="Update task status")
 async def status_cmd(
     interaction: discord.Interaction,
     task_ids: str,
     status: Literal["todo", "done"],
 ):
-    await interaction.response.send_message("???...", ephemeral=True)
+    await interaction.response.send_message("Updating...", ephemeral=True)
 
     try:
         parsed_ids = parse_task_ids(task_ids)
     except ValueError:
-        await interaction.edit_original_response(content="task_id ? 1,2,3 ????????????")
+        await interaction.edit_original_response(content="Use task IDs like 1,2,3")
         return
 
     await run_blocking(load_tasks)
@@ -506,10 +506,10 @@ async def status_cmd(
     if not target_tasks:
         messages = []
         if missing_ids:
-            messages.append(f"??????ID: {', '.join(map(str, missing_ids))}")
+            messages.append(f"Missing IDs: {', ' .join(map(str, missing_ids))}")
         if forbidden_ids:
-            messages.append(f"????ID: {', '.join(map(str, forbidden_ids))}")
-        await interaction.edit_original_response(content="\\n".join(messages) if messages else "更新対象なし")
+            messages.append(f"Forbidden IDs: {', ' .join(map(str, forbidden_ids))}")
+        await interaction.edit_original_response(content="\n".join(messages) if messages else "No matching tasks")
         return
 
     try:
@@ -518,15 +518,15 @@ async def status_cmd(
         await run_blocking(load_tasks)
     except Exception as e:
         print("[status] error:", e)
-        await interaction.edit_original_response(content="????")
+        await interaction.edit_original_response(content="Update failed")
         return
 
     updated_ids = ", ".join(f"[{task['id']}]" for task in target_tasks)
-    messages = [f"状態更新: {updated_ids} -> {status}"]
+    messages = [f"Updated: {updated_ids} -> {status}"]
     if missing_ids:
-        messages.append(f"??????ID: {', '.join(map(str, missing_ids))}")
+        messages.append(f"Missing IDs: {', ' .join(map(str, missing_ids))}")
     if forbidden_ids:
-        messages.append(f"????ID: {', '.join(map(str, forbidden_ids))}")
+        messages.append(f"Forbidden IDs: {', ' .join(map(str, forbidden_ids))}")
     await interaction.edit_original_response(content="\\n".join(messages))
 
 
