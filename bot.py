@@ -960,7 +960,8 @@ class TaskActionsView(discord.ui.View):
         self.page = min(self.page, self.total_pages() - 1)
         try:
             await interaction.edit_original_response(content=self.render_content(), view=self.rebuild())
-            await interaction.followup.send(f"Updated: {updated_ids} -> {status}", ephemeral=True)
+            if not done_log_targets:
+                await interaction.followup.send(f"Updated: {updated_ids} -> {status}", ephemeral=True)
         except Exception as e:
             print("[tasks_ui status] edit error:", e)
             await interaction.followup.send("更新は完了しました。UIの更新に失敗しました", ephemeral=True)
