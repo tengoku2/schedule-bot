@@ -1453,9 +1453,12 @@ async def on_ready():
     # 実機検証では複数 guild を跨いで使っているため、
     # 1 guild 固定ではなく、参加中の全 guild に guild command を同期する。
     # global sync だけだと反映が遅く、旧定義の slash command を触ってしまう。
+    # guild sync を使う場合は、global command を各 guild に明示的にコピーしてから同期する。
     for guild in bot.guilds:
         try:
-            await tree.sync(guild=discord.Object(id=guild.id))
+            guild_object = discord.Object(id=guild.id)
+            tree.copy_global_to(guild=guild_object)
+            await tree.sync(guild=guild_object)
             print("[startup] guild sync done:", guild.id, guild.name)
         except Exception as e:
             print("[startup] guild sync error:", guild.id, e)
