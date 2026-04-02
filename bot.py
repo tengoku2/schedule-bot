@@ -417,7 +417,10 @@ async def get_accessible_autocomplete_tasks(interaction: discord.Interaction):
     if not interaction.guild:
         return []
 
-    await run_blocking(load_tasks)
+    try:
+        await run_blocking(load_tasks)
+    except Exception as e:
+        print("[autocomplete] load_tasks error:", e)
     manager = is_manager(interaction)
     return get_filtered_tasks_for_user(interaction.guild.id, interaction.user.id, manager)
 
@@ -1041,35 +1044,40 @@ async def delete_task_cmd(interaction: discord.Interaction, task_ids: str):
 
 @delete_task_cmd.autocomplete("task_ids")
 async def delete_task_ids_autocomplete(interaction: discord.Interaction, current: str):
-    tasks = await get_accessible_autocomplete_tasks(interaction)
+    try:
+        tasks = await get_accessible_autocomplete_tasks(interaction)
 
-    raw = current or ""
-    parts = [part.strip() for part in raw.split(",")]
-    prefix_parts = parts[:-1]
-    current_part = parts[-1] if parts else ""
-    selected_ids = {part for part in prefix_parts if part.isdigit()}
+        raw = current or ""
+        parts = [part.strip() for part in raw.split(",")]
+        prefix_parts = parts[:-1]
+        current_part = parts[-1] if parts else ""
+        selected_ids = {part for part in prefix_parts if part.isdigit()}
 
-    choices = []
-    for task in filter_task_choices(tasks, current_part):
-        task_id_text = str(task["id"])
-        if task_id_text in selected_ids:
-            continue
+        choices = []
+        for task in filter_task_choices(tasks, current_part):
+            task_id_text = str(task["id"])
+            if task_id_text in selected_ids:
+                continue
 
-        choice_value_parts = prefix_parts + [task_id_text]
-        choice_value = ",".join(part for part in choice_value_parts if part)
-        if raw.endswith(","):
-            choice_value = raw + task_id_text
+            choice_value_parts = prefix_parts + [task_id_text]
+            choice_value = ",".join(part for part in choice_value_parts if part)
+            if raw.endswith(","):
+                choice_value = raw + task_id_text
 
-        choices.append(
-            app_commands.Choice(
-                name=format_task_choice_name(task),
-                value=choice_value,
+            choices.append(
+                app_commands.Choice(
+                    name=format_task_choice_name(task),
+                    value=choice_value,
+                )
             )
-        )
-        if len(choices) >= 25:
-            break
+            if len(choices) >= 25:
+                break
 
-    return choices
+        print("[autocomplete delete]", interaction.guild.id if interaction.guild else None, current, len(choices))
+        return choices
+    except Exception as e:
+        print("[autocomplete delete] error:", e)
+        return []
 
 
 @tree.command(name="edit", description="タスク編集")
@@ -1153,11 +1161,17 @@ async def edit_task_cmd(
 
 @edit_task_cmd.autocomplete("task_id")
 async def edit_task_id_autocomplete(interaction: discord.Interaction, current: str):
-    tasks = await get_accessible_autocomplete_tasks(interaction)
-    return [
-        app_commands.Choice(name=format_task_choice_name(task), value=str(task["id"]))
-        for task in filter_task_choices(tasks, current)
-    ]
+    try:
+        tasks = await get_accessible_autocomplete_tasks(interaction)
+        choices = [
+            app_commands.Choice(name=format_task_choice_name(task), value=str(task["id"]))
+            for task in filter_task_choices(tasks, current)
+        ]
+        print("[autocomplete edit]", interaction.guild.id if interaction.guild else None, current, len(choices))
+        return choices
+    except Exception as e:
+        print("[autocomplete edit] error:", e)
+        return []
 
 
 @edit_task_cmd.autocomplete("dt_str")
@@ -1462,6 +1476,14 @@ async def on_ready():
             print("[startup] guild sync done:", guild.id, guild.name)
         except Exception as e:
             print("[startup] guild sync error:", guild.id, e)
+
+    try:
+        global_commands = await bot.http.get_global_commands(bot.application_id)
+        for command in global_commands:
+            await bot.http.delete_global_command(bot.application_id, command["id"])
+        print("[startup] cleared global commands:", len(global_commands))
+    except Exception as e:
+        print("[startup] clear global commands error:", e)
 
     try:
         await run_blocking(load_tasks)
