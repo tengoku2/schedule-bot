@@ -627,12 +627,24 @@ async def send_task_notification_with_mentions(task, message, allowed_mentions_o
     return True
 
 
-def format_delete_log_message(executor_name, count):
-    return (
-        "🗑【削除】\n"
-        f"実行者: {executor_name}\n"
-        f"{count}件削除"
-    )
+def format_delete_log_message(executor_name, tasks_for_log):
+    count = len(tasks_for_log)
+    lines = [
+        "🗑【削除】",
+        f"実行者: {executor_name}",
+        f"{count}件削除",
+    ]
+
+    for task in tasks_for_log[:10]:
+        due = task["due"]
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=JST)
+        lines.append(f"[{task['id']}] {task['task']} ({due.strftime('%m/%d %H:%M')})")
+
+    if count > 10:
+        lines.append("...")
+
+    return "\n".join(lines)
 
 
 async def send_delete_log(tasks_for_log, executor_name):
@@ -647,7 +659,7 @@ async def send_delete_log(tasks_for_log, executor_name):
     for grouped_tasks in grouped.values():
         await send_task_notification_with_mentions(
             grouped_tasks[0],
-            format_delete_log_message(executor_name, len(grouped_tasks)),
+            format_delete_log_message(executor_name, grouped_tasks),
             allowed_mentions_override=discord.AllowedMentions.none(),
         )
 

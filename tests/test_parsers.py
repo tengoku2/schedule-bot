@@ -148,9 +148,13 @@ class LabelToTextTests(unittest.TestCase):
 
 class DeleteLogFormattingTests(unittest.TestCase):
     def test_format_delete_log_message(self):
+        tasks = [
+            {"id": 7, "task": "設計レビュー", "due": datetime.datetime(2026, 4, 3, 10, 0)},
+            {"id": 8, "task": "実装確認", "due": datetime.datetime(2026, 4, 4, 11, 30)},
+        ]
         self.assertEqual(
-            bot.format_delete_log_message("alice", 3),
-            "🗑【削除】\n実行者: alice\n3件削除",
+            bot.format_delete_log_message("alice", tasks),
+            "🗑【削除】\n実行者: alice\n2件削除\n[7] 設計レビュー (04/03 10:00)\n[8] 実装確認 (04/04 11:30)",
         )
 
 
