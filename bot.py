@@ -819,11 +819,15 @@ class TaskPickerSelect(discord.ui.Select):
 
 
 class TaskActionsView(discord.ui.View):
-    def __init__(self, tasks_for_ui, owner_user_id, manager):
+    def __init__(self, tasks_for_ui, guild_id, owner_user_id, manager, channel_id=None, status_filter=None, mine_only=False):
         super().__init__(timeout=180)
         self.tasks_for_ui = tasks_for_ui
+        self.guild_id = guild_id
         self.owner_user_id = owner_user_id
         self.manager = manager
+        self.channel_id = channel_id
+        self.status_filter = status_filter
+        self.mine_only = mine_only
         self.page = 0
         self.selected_ids = set()
         self.message = None
@@ -896,13 +900,20 @@ class TaskActionsView(discord.ui.View):
             return
 
         self.tasks_for_ui = get_filtered_tasks_for_user(
-            interaction.guild.id,
+            self.guild_id,
             self.owner_user_id,
             self.manager,
+            channel_id=self.channel_id,
+            status=self.status_filter,
+            mine_only=self.mine_only,
         )
         self.selected_ids.clear()
         self.page = min(self.page, self.total_pages() - 1)
-        await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+        try:
+            await interaction.response.edit_message(content=self.render_content(), view=self.rebuild())
+        except Exception as e:
+            print("[tasks_ui status] edit error:", e)
+            await interaction.followup.send("更新は完了しました。UIの更新に失敗しました", ephemeral=True)
 
     async def _run_delete(self, interaction):
         selected_tasks = self.selected_tasks()
@@ -996,6 +1007,44 @@ async def status_cmd(
     if forbidden_ids:
         messages.append(f"Forbidden IDs: {', ' .join(map(str, forbidden_ids))}")
     await interaction.edit_original_response(content="\\n".join(messages))
+
+
+@status_cmd.autocomplete("task_ids")
+async def status_task_ids_autocomplete(interaction: discord.Interaction, current: str):
+    try:
+        tasks = await get_accessible_autocomplete_tasks(interaction)
+
+        raw = current or ""
+        parts = [part.strip() for part in raw.split(",")]
+        prefix_parts = parts[:-1]
+        current_part = parts[-1] if parts else ""
+        selected_ids = {part for part in prefix_parts if part.isdigit()}
+
+        choices = []
+        for task in filter_task_choices(tasks, current_part):
+            task_id_text = str(task["id"])
+            if task_id_text in selected_ids:
+                continue
+
+            choice_value_parts = prefix_parts + [task_id_text]
+            choice_value = ",".join(part for part in choice_value_parts if part)
+            if raw.endswith(","):
+                choice_value = raw + task_id_text
+
+            choices.append(
+                app_commands.Choice(
+                    name=format_task_choice_name(task),
+                    value=choice_value,
+                )
+            )
+            if len(choices) >= 25:
+                break
+
+        print("[autocomplete status]", interaction.guild.id if interaction.guild else None, current, len(choices))
+        return choices
+    except Exception as e:
+        print("[autocomplete status] error:", e)
+        return []
 
 
 @tree.command(name="add", description="タスク追加")
@@ -1326,7 +1375,15 @@ async def tasks_ui(
         mine_only=mine_only,
     )
 
-    view = TaskActionsView(filtered_tasks, interaction.user.id, manager)
+    view = TaskActionsView(
+        filtered_tasks,
+        interaction.guild.id,
+        interaction.user.id,
+        manager,
+        channel_id=source_channel_id,
+        status_filter=status,
+        mine_only=mine_only,
+    )
     await interaction.edit_original_response(content=view.render_content(), view=view)
     view.message = await interaction.original_response()
 
