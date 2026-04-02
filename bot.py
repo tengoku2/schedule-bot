@@ -363,6 +363,13 @@ def is_manager(interaction):
         return False
 
 
+def is_manager_member(member, guild_settings):
+    role_id = guild_settings.get("manager_role_id") if guild_settings else None
+    if not member or not role_id:
+        return False
+    return any(role.id == role_id for role in member.roles)
+
+
 def resolve_notification_channel_id(task):
     if task.get("notify_channel_id"):
         return task["notify_channel_id"]
@@ -416,11 +423,41 @@ async def send_task_notification(task, message):
         print("[notify] channel not found:", channel_id, task.get("task"))
         return False
 
+    settings = get_guild_settings(task["guild_id"])
+    guild = bot.get_guild(task["guild_id"])
+    owner_member = None
+    if guild and task.get("owner_id"):
+        owner_member = guild.get_member(task["owner_id"])
+        if owner_member is None:
+            try:
+                owner_member = await guild.fetch_member(task["owner_id"])
+            except Exception as e:
+                print("[notify] fetch_member error:", task.get("owner_id"), e)
+
+    if owner_member is None:
+        allowed_mentions = discord.AllowedMentions(
+            roles=False,
+            users=False,
+            everyone=False,
+        )
+    elif is_manager_member(owner_member, settings):
+        allowed_mentions = discord.AllowedMentions(
+            roles=True,
+            users=True,
+            everyone=True,
+        )
+    else:
+        allowed_mentions = discord.AllowedMentions(
+            roles=True,
+            users=False,
+            everyone=False,
+        )
+
     content = f"{build_manager_mention(task)}{message}"
     try:
         await channel.send(
             content,
-            allowed_mentions=discord.AllowedMentions(roles=True),
+            allowed_mentions=allowed_mentions,
         )
     except Exception as e:
         print("[notify] send error:", channel_id, task.get("task"), e)
@@ -622,13 +659,25 @@ async def add(
         await interaction.edit_original_response(content="DBエラー")
         return
 
-    await interaction.edit_original_response(content=f"追加: {task_name}\nDue: {due.strftime('%m/%d %H:%M')}")
+    reminder_text = ", ".join(label_to_text(r["label"]) for r in filtered) if filtered else "なし"
+    channel_text = f"<#{channel.id}>" if channel else "デフォルト"
+
+    await interaction.edit_original_response(
+        content=(
+            "✅ タスク追加\n"
+            f"📌 {task_name}\n"
+            f"🕒 {due.strftime('%m/%d %H:%M')}\n"
+            f"🔔 {reminder_text}\n"
+            f"📢 {channel_text}"
+        )
+    )
     await send_task_notification(
         {
             "task": task_name,
             "due": due,
             "channel_id": interaction.channel.id,
             "notify_channel_id": channel.id if channel else None,
+            "owner_id": interaction.user.id,
             "guild_id": interaction.guild.id,
         },
         f"Task added: {task_name}\nDue: {due.strftime('%m/%d %H:%M')}",

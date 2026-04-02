@@ -1,6 +1,7 @@
 import datetime
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import bot
 
@@ -95,6 +96,17 @@ class LabelToTextTests(unittest.TestCase):
     def test_label_to_text_supports_minutes_and_existing_months(self):
         self.assertEqual(bot.label_to_text("10minute"), "10分前")
         self.assertEqual(bot.label_to_text("1month"), "1ヶ月前")
+
+
+class ManagerMemberTests(unittest.TestCase):
+    def test_is_manager_member_true_when_role_matches(self):
+        member = SimpleNamespace(roles=[SimpleNamespace(id=10), SimpleNamespace(id=20)])
+        settings = {"manager_role_id": 20}
+        self.assertTrue(bot.is_manager_member(member, settings))
+
+    def test_is_manager_member_false_without_member(self):
+        settings = {"manager_role_id": 20}
+        self.assertFalse(bot.is_manager_member(None, settings))
 
 
 if __name__ == "__main__":
