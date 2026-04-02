@@ -891,7 +891,10 @@ class TaskActionsView(discord.ui.View):
             await interaction.response.send_message("タスクを選択してください", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        processing_view = self.rebuild()
+        for item in processing_view.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="更新中...", view=processing_view)
 
         try:
             await run_blocking(update_status_bulk, [task["id"] for task in selected_tasks], status)
@@ -899,6 +902,10 @@ class TaskActionsView(discord.ui.View):
         except Exception as e:
             print("[tasks_ui status] error:", e)
             await interaction.followup.send("更新に失敗しました", ephemeral=True)
+            try:
+                await interaction.message.edit(content=self.render_content(), view=self.rebuild())
+            except Exception as restore_error:
+                print("[tasks_ui status] restore error:", restore_error)
             return
 
         self.tasks_for_ui = get_filtered_tasks_for_user(
