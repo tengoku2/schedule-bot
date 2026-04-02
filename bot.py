@@ -134,20 +134,31 @@ def parse_datetime_input(dt_str):
 
 
 def parse_reminders(reminder_str):
+    import re
+
     mapping = {
-        "m": ("month", 30),
+        "y": ("year", 365),
+        "mo": ("month", 30),
         "w": ("week", 7),
         "d": ("day", 1),
         "h": ("hour", 1 / 24),
+        "m": ("minute", 1 / 1440),
     }
 
     result = []
     for part in reminder_str.split(","):
         part = part.strip().lower()
-        num = int(part[:-1])
-        unit = part[-1]
+
+        match = re.match(r"(\d+)([a-z]+)", part)
+        if not match:
+            raise ValueError("単位エラー")
+
+        num = int(match.group(1))
+        unit = match.group(2)
+
         if unit not in mapping:
             raise ValueError("単位エラー")
+
         name, base = mapping[unit]
         result.append((f"{num}{name}", num * base))
     return result
@@ -166,6 +177,8 @@ def label_to_text(label):
         return label
 
     num = match.group(1)
+    if "year" in label:
+        return f"{num}年前"
     if "month" in label:
         return f"{num}ヶ月前"
     if "week" in label:
@@ -174,6 +187,8 @@ def label_to_text(label):
         return f"{num}日前"
     if "hour" in label:
         return f"{num}時間前"
+    if "minute" in label:
+        return f"{num}分前"
     return label
 
 
@@ -963,7 +978,6 @@ async def on_ready():
     except Exception as e:
         print("[startup] initial load error:", e)
 
-    await tree.sync()
     print("[startup] command sync done")
 
     if not reminder_loop.is_running():

@@ -50,6 +50,15 @@ class ParseRemindersTests(unittest.TestCase):
         parsed = bot.parse_reminders("1d,3h")
         self.assertEqual(parsed, [("1day", 1), ("3hour", 3 / 24)])
 
+    def test_parse_multi_character_units(self):
+        parsed = bot.parse_reminders("10m,5h,1mo,2y")
+        self.assertEqual(parsed[0][0], "10minute")
+        self.assertAlmostEqual(parsed[0][1], 10 / 1440)
+        self.assertEqual(parsed[1][0], "5hour")
+        self.assertAlmostEqual(parsed[1][1], 5 / 24)
+        self.assertEqual(parsed[2], ("1month", 30))
+        self.assertEqual(parsed[3], ("2year", 730))
+
 
 class ParseTaskIdsTests(unittest.TestCase):
     def test_parse_task_ids(self):
@@ -80,6 +89,12 @@ class NotificationRoutingTests(unittest.TestCase):
     def test_build_manager_mention_skips_task_specific_channel(self, _mock_settings):
         task = {"notify_channel_id": 100, "channel_id": 10, "guild_id": 1}
         self.assertEqual(bot.build_manager_mention(task), "")
+
+
+class LabelToTextTests(unittest.TestCase):
+    def test_label_to_text_supports_minutes_and_existing_months(self):
+        self.assertEqual(bot.label_to_text("10minute"), "10分前")
+        self.assertEqual(bot.label_to_text("1month"), "1ヶ月前")
 
 
 if __name__ == "__main__":
