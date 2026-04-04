@@ -821,12 +821,13 @@ class BulkActionConfirmView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content=f"{self.action_name}中...", view=None)
         try:
-            await self.callback(self.tasks_to_apply, interaction)
+            result = await self.callback(self.tasks_to_apply, interaction)
         except Exception as e:
             print("[bulk_action] error:", e)
             await interaction.followup.send(f"{self.action_name}に失敗しました", ephemeral=True)
             return
-        await interaction.followup.send(f"{len(self.tasks_to_apply)}件{self.action_name}しました", ephemeral=True)
+        if result is not False:
+            await interaction.followup.send(f"{len(self.tasks_to_apply)}件{self.action_name}しました", ephemeral=True)
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1055,7 +1056,10 @@ async def status_cmd(
         messages.append(f"Missing IDs: {', ' .join(map(str, missing_ids))}")
     if forbidden_ids:
         messages.append(f"Forbidden IDs: {', ' .join(map(str, forbidden_ids))}")
-    await interaction.edit_original_response(content="\\n".join(messages))
+    if status == "done" and not missing_ids and not forbidden_ids:
+        await interaction.delete_original_response()
+        return
+    await interaction.edit_original_response(content="\n".join(messages))
 
 
 @status_cmd.autocomplete("task_ids")
@@ -1510,6 +1514,8 @@ async def status_bulk(
         await run_blocking(load_tasks)
         done_log_targets = [task for task in tasks_to_apply if task["status"] == "todo" and status == "done"]
         await send_done_log(done_log_targets, interaction_for_log.user.display_name)
+        if status == "done":
+            return False
 
     view = BulkActionConfirmView(f"status を {status} に変更", target_tasks, do_status)
     lines = [f"{len(target_tasks)}件を {status} に変更します。実行しますか？"]
