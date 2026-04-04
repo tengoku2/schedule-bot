@@ -24,6 +24,8 @@ DEFAULT_REMINDERS = [
     ("1day", 1),
     ("3hours", 3 / 24),
 ]
+STATUS_BULK_COOLDOWN_SECONDS = 10
+status_bulk_cooldowns = {}
 
 
 async def run_blocking(func, *args, **kwargs):
@@ -818,6 +820,49 @@ async def send_done_log(tasks_for_log, executor_name):
             print("[done_log] sent:", channel_id, len(grouped_tasks))
         except Exception as e:
             print("[done_log] send error:", channel_id, e)
+
+
+def format_status_bulk_log_message(executor_label, target_label, tasks_for_log, status):
+    count = len(tasks_for_log)
+    lines = [
+        "🔄 一括ステータス更新",
+        f"実行者: {executor_label}",
+        f"対象: {target_label}",
+        f"件数: {count}件",
+        f"→ {status}",
+    ]
+
+    preview = tasks_for_log[:5]
+    for task in preview:
+        lines.append(f"[{task['id']}] {task['task']}")
+
+    if count > 5:
+        lines.append(f"その他{count - 5}件...")
+
+    return "\n".join(lines)
+
+
+async def send_status_bulk_log(tasks_for_log, executor_label, target_label, status):
+    if not tasks_for_log:
+        return
+
+    grouped = {}
+    for task in tasks_for_log:
+        channel_id = resolve_notification_channel_id(task)
+        grouped.setdefault(channel_id, []).append(task)
+
+    for channel_id, grouped_tasks in grouped.items():
+        channel = await get_target_channel(channel_id)
+        if not channel:
+            print("[status_bulk_log] channel not found:", channel_id)
+            continue
+        try:
+            await channel.send(
+                format_status_bulk_log_message(executor_label, target_label, grouped_tasks, status),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as e:
+            print("[status_bulk_log] send error:", channel_id, e)
 
 
 def format_due_message(task, due):
@@ -1663,6 +1708,7 @@ async def status_bulk(
     status: Literal["todo", "done"],
     channel: Optional[discord.TextChannel] = None,
     mine_only: bool = False,
+    owner: Optional[discord.Member] = None,
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1671,25 +1717,49 @@ async def status_bulk(
     await interaction.response.send_message("対象を確認中...", ephemeral=True)
     await run_blocking(load_tasks)
     manager = is_manager(interaction)
+    if owner is not None and owner.id != interaction.user.id and not manager:
+        await interaction.edit_original_response(content="他人のタスクを変更できるのは manager_role のみです")
+        return
+    if not manager:
+        last_used = status_bulk_cooldowns.get(interaction.user.id)
+        now = datetime.datetime.now(JST)
+        if last_used and (now - last_used).total_seconds() < STATUS_BULK_COOLDOWN_SECONDS:
+            await interaction.edit_original_response(content="少し待ってから再実行してください")
+            return
+        status_bulk_cooldowns[interaction.user.id] = now
+
     target_tasks = get_filtered_tasks_for_user(
         interaction.guild.id,
         interaction.user.id,
         manager,
         channel_id=channel.id if channel else None,
         mine_only=mine_only,
+        owner_id=owner.id if owner else None,
     )
 
     if not target_tasks:
         await interaction.edit_original_response(content="対象タスクがありません")
         return
 
+    if owner is not None:
+        target_label = "自分" if owner.id == interaction.user.id else owner.mention
+    elif mine_only or not manager:
+        target_label = "自分"
+    else:
+        target_label = "条件一致"
+
     async def do_status(tasks_to_apply, interaction_for_log):
         await run_blocking(update_status_bulk, [task["id"] for task in tasks_to_apply], status)
         await run_blocking(load_tasks)
         done_log_targets = [task for task in tasks_to_apply if task["status"] == "todo" and status == "done"]
         await send_done_log(done_log_targets, interaction_for_log.user.display_name)
-        if status == "done":
-            return False
+        await send_status_bulk_log(
+            tasks_to_apply,
+            interaction_for_log.user.mention,
+            target_label,
+            status,
+        )
+        return False
 
     view = BulkActionConfirmView(f"status を {status} に変更", target_tasks, do_status)
     lines = [f"{len(target_tasks)}件を {status} に変更します。実行しますか？"]

@@ -253,6 +253,20 @@ class DeleteLogFormattingTests(unittest.TestCase):
             "✅【完了】\n実行者: alice\n1件完了\n[7] 設計レビュー (04/03 10:00)",
         )
 
+    def test_format_status_bulk_log_message(self):
+        tasks = [
+            {"id": 12, "task": "タスクA"},
+            {"id": 15, "task": "タスクB"},
+            {"id": 18, "task": "タスクC"},
+            {"id": 19, "task": "タスクD"},
+            {"id": 20, "task": "タスクE"},
+            {"id": 21, "task": "タスクF"},
+        ]
+        self.assertEqual(
+            bot.format_status_bulk_log_message("@alice", "@bob", tasks, "done"),
+            "🔄 一括ステータス更新\n実行者: @alice\n対象: @bob\n件数: 6件\n→ done\n[12] タスクA\n[15] タスクB\n[18] タスクC\n[19] タスクD\n[20] タスクE\nその他1件...",
+        )
+
 
 class ManagerMemberTests(unittest.TestCase):
     def test_is_manager_member_true_when_role_matches(self):
