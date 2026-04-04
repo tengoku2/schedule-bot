@@ -75,11 +75,12 @@ class TaskChoiceFormattingTests(unittest.TestCase):
         task = {
             "id": 12,
             "task": "資料作成",
+            "status": "todo",
             "due": datetime.datetime(2026, 4, 3, 9, 30),
         }
         self.assertEqual(
             bot.format_task_choice_name(task),
-            "[12] 資料作成（04/03 09:30）",
+            "[12] 資料作成（todo）",
         )
 
     def test_filter_task_choices_matches_id_and_name(self):
@@ -149,12 +150,12 @@ class LabelToTextTests(unittest.TestCase):
 class DeleteLogFormattingTests(unittest.TestCase):
     def test_format_delete_log_message(self):
         tasks = [
-            {"id": 7, "task": "設計レビュー", "due": datetime.datetime(2026, 4, 3, 10, 0)},
-            {"id": 8, "task": "実装確認", "due": datetime.datetime(2026, 4, 4, 11, 30)},
+            {"id": 7, "task": "設計レビュー", "status": "done", "due": datetime.datetime(2026, 4, 3, 10, 0)},
+            {"id": 8, "task": "実装確認", "status": "todo", "due": datetime.datetime(2026, 4, 4, 11, 30)},
         ]
         self.assertEqual(
             bot.format_delete_log_message("alice", tasks),
-            "🗑【削除】\n実行者: alice\n2件削除\n[7] 設計レビュー (04/03 10:00)\n[8] 実装確認 (04/04 11:30)",
+            "🗑【削除】\n実行者: alice\n2件削除\n[7] 設計レビュー (done)\n[8] 実装確認 (todo)",
         )
 
     def test_format_done_log_message(self):

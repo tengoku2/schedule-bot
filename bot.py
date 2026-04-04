@@ -470,16 +470,12 @@ def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, sta
 
 
 def format_task_choice_name(task):
-    due = task["due"]
-    if due.tzinfo is None:
-        due = due.replace(tzinfo=JST)
-
     task_name = str(task["task"]).replace("\n", " ").strip()
-    label = f"[{task['id']}] {task_name}（{due.strftime('%m/%d %H:%M')}）"
+    suffix = f"（{task['status']}）"
+    label = f"[{task['id']}] {task_name}{suffix}"
     if len(label) <= 100:
         return label
 
-    suffix = f"（{due.strftime('%m/%d %H:%M')}）"
     prefix = f"[{task['id']}] "
     max_task_len = max(0, 100 - len(prefix) - len(suffix) - 1)
     shortened = task_name[:max_task_len] + "…" if max_task_len < len(task_name) else task_name
@@ -639,7 +635,7 @@ def format_delete_log_message(executor_name, tasks_for_log):
         due = task["due"]
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
-        lines.append(f"[{task['id']}] {task['task']} ({due.strftime('%m/%d %H:%M')})")
+        lines.append(f"[{task['id']}] {task['task']} ({task['status']})")
 
     if count > 10:
         lines.append("...")
@@ -1054,7 +1050,7 @@ async def status_cmd(
         return
 
     updated_ids = ", ".join(f"[{task['id']}]" for task in target_tasks)
-    messages = [f"Updated: {updated_ids} -> {status}"]
+    messages = [f"Updated: {updated_ids} -> {status}", f"ステータス更新: {status}"]
     if missing_ids:
         messages.append(f"Missing IDs: {', ' .join(map(str, missing_ids))}")
     if forbidden_ids:
@@ -1642,6 +1638,9 @@ async def reminder_loop():
     await run_blocking(load_tasks)
 
     for task in tasks_list:
+        if task["status"] == "done":
+            continue
+
         due = task["due"]
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
