@@ -1049,8 +1049,8 @@ async def status_cmd(
         await interaction.edit_original_response(content="Update failed")
         return
 
-    updated_ids = ", ".join(f"[{task['id']}]" for task in target_tasks)
-    messages = [f"Updated: {updated_ids} -> {status}", f"ステータス更新: {status}"]
+    messages = [f"[{task['id']}] {task['task']} → {status}" for task in target_tasks]
+    messages.append(f"ステータス更新: {status}")
     if missing_ids:
         messages.append(f"Missing IDs: {', ' .join(map(str, missing_ids))}")
     if forbidden_ids:
@@ -1656,6 +1656,8 @@ async def reminder_loop():
             and now.minute == 0
         ):
             if today_str not in notified:
+                if task["status"] == "done":
+                    continue
                 await send_task_notification(task, format_daily_message(task, due))
                 notified.append(today_str)
                 await run_blocking(append_notified, task["id"], notified)
@@ -1663,6 +1665,8 @@ async def reminder_loop():
 
         notified = list(task.get("notified", []))
         if "due" not in notified and now >= due:
+            if task["status"] == "done":
+                continue
             await send_task_notification(task, format_due_message(task, due))
             notified.append("due")
             await run_blocking(append_notified, task["id"], notified)
@@ -1675,6 +1679,8 @@ async def reminder_loop():
             if label in notified:
                 continue
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
+                if task["status"] == "done":
+                    continue
                 await send_task_notification(task, format_reminder_message(task, due, label))
                 notified.append(label)
                 await run_blocking(append_notified, task["id"], notified)
