@@ -1281,14 +1281,37 @@ async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
     now = datetime.datetime.now(JST)
     if not current:
         return [
-            app_commands.Choice(name="明日の0時", value=""),
-            app_commands.Choice(name="3時間後", value="300"),
+            app_commands.Choice(name="明日 -> 00:00", value="明日"),
+            app_commands.Choice(name="3時間後", value="3時間後"),
             app_commands.Choice(name="今日18:00", value="1800"),
         ]
-    if not current.isdigit():
-        return []
+
+    suggestions = []
+    stripped = current.strip()
+
+    if "明日" in stripped:
+        try:
+            due = parse_datetime_input(stripped)
+            suggestions.append(app_commands.Choice(name=f"{stripped} -> {due.strftime('%m/%d %H:%M')}", value=stripped))
+        except Exception:
+            pass
+
+    if "/" in stripped:
+        try:
+            due = parse_datetime_input(stripped)
+            suggestions.append(app_commands.Choice(name=f"{stripped} -> {due.strftime('%m/%d %H:%M')}", value=stripped))
+        except Exception:
+            pass
+
+    if stripped.endswith("後") or any(unit in stripped for unit in ["分後", "時間後", "日後"]):
+        try:
+            due = parse_datetime_input(stripped)
+            suggestions.append(app_commands.Choice(name=f"{stripped} -> {due.strftime('%m/%d %H:%M')}", value=stripped))
+        except Exception:
+            pass
+
     try:
-        due = parse_datetime_input(current)
+        due = parse_datetime_input(stripped)
         diff = due - now
         days = diff.days
         hours = diff.seconds // 3600
@@ -1301,10 +1324,21 @@ async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
         if minutes > 0:
             parts.append(f"{minutes}分")
         remain_text = "".join(parts) if parts else "すぐ"
-        label = f"{current} -> {due.strftime('%m/%d %H:%M')} ({remain_text}後)"
-        return [app_commands.Choice(name=label, value=current)]
+        label = f"{stripped} -> {due.strftime('%m/%d %H:%M')} ({remain_text}後)"
+        suggestions.append(app_commands.Choice(name=label, value=stripped))
     except Exception:
-        return [app_commands.Choice(name="形式エラー", value=current)]
+        if not suggestions:
+            return [app_commands.Choice(name="形式エラー", value=current)]
+
+    deduped = []
+    seen = set()
+    for choice in suggestions:
+        key = (choice.name, choice.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(choice)
+    return deduped[:25]
 
 
 @tree.command(name="delete", description="タスク削除")
