@@ -1751,8 +1751,6 @@ async def status_bulk(
     async def do_status(tasks_to_apply, interaction_for_log):
         await run_blocking(update_status_bulk, [task["id"] for task in tasks_to_apply], status)
         await run_blocking(load_tasks)
-        done_log_targets = [task for task in tasks_to_apply if task["status"] == "todo" and status == "done"]
-        await send_done_log(done_log_targets, interaction_for_log.user.display_name)
         await send_status_bulk_log(
             tasks_to_apply,
             interaction_for_log.user.mention,
