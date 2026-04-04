@@ -1617,6 +1617,9 @@ async def delete_bulk(
     if owner is not None and mine_only:
         await interaction.edit_original_response(content="owner と mine_only は併用できません")
         return
+    if owner is not None and owner.id == interaction.user.id and not mine_only:
+        await interaction.edit_original_response(content="owner に自分を指定する場合は mine_only を使ってください")
+        return
     target_tasks = get_filtered_tasks_for_user(
         interaction.guild.id,
         interaction.user.id,
