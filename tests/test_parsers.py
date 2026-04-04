@@ -74,6 +74,34 @@ class ParseDateTimeInputTests(unittest.TestCase):
         self.assertEqual(due.hour, 15)
         self.assertEqual(due.minute, 0)
 
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_days_default_to_midnight(self):
+        due = bot.parse_datetime_input("2日後")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 4)
+        self.assertEqual(due.hour, 0)
+        self.assertEqual(due.minute, 0)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_days_with_compact_time(self):
+        due = bot.parse_datetime_input("2日後 1830")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 4)
+        self.assertEqual(due.hour, 18)
+        self.assertEqual(due.minute, 30)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_days_with_now_alias_uses_current_time(self):
+        due = bot.parse_datetime_input("1日後 now")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 12)
+        self.assertEqual(due.minute, 0)
+
+    def test_now_alone_is_invalid(self):
+        with self.assertRaises(ValueError):
+            bot.parse_datetime_input("now")
+
     def test_invalid_non_numeric_input(self):
         with self.assertRaises(ValueError):
             bot.parse_datetime_input("ab")

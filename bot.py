@@ -127,6 +127,28 @@ def parse_slash_datetime_input(dt_str, now):
     return due
 
 
+def parse_relative_day_input(dt_str, now):
+    import re
+
+    match = re.fullmatch(r"(\d+)日後(?:\s+(.+))?", dt_str)
+    if not match:
+        raise ValueError("相対日付形式エラー")
+
+    days = int(match.group(1))
+    time_part = (match.group(2) or "").strip()
+    target_date = now.date() + datetime.timedelta(days=days)
+
+    if not time_part:
+        return datetime.datetime.combine(target_date, datetime.time(0, 0), tzinfo=JST)
+
+    lowered = time_part.lower()
+    if lowered in ["今", "now"]:
+        return datetime.datetime.combine(target_date, datetime.time(now.hour, now.minute), tzinfo=JST)
+
+    hour, minute = parse_compact_time_value(time_part)
+    return datetime.datetime.combine(target_date, datetime.time(hour, minute), tzinfo=JST)
+
+
 def parse_datetime_input(dt_str):
     import re
 
@@ -148,6 +170,13 @@ def parse_datetime_input(dt_str):
 
     if "/" in dt_str:
         return parse_slash_datetime_input(dt_str, now)
+
+    if dt_str.lower() in ["今", "now"]:
+        raise ValueError("日付指定が必要です")
+
+    relative_day_match = re.fullmatch(r"(\d+)日後(?:\s+(.+))?", dt_str)
+    if relative_day_match:
+        return parse_relative_day_input(dt_str, now)
 
     relative_match = re.fullmatch(r"(\d+)\s*(分|時間|日)後", dt_str)
     if relative_match:
@@ -1307,6 +1336,13 @@ async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
         try:
             due = parse_datetime_input(stripped)
             suggestions.append(app_commands.Choice(name=f"{stripped} -> {due.strftime('%m/%d %H:%M')}", value=stripped))
+        except Exception:
+            pass
+
+    if "今" in stripped or "now" in stripped.lower():
+        try:
+            due = parse_datetime_input(stripped)
+            suggestions.append(app_commands.Choice(name=f"{stripped} ({due.strftime('%m/%d %H:%M')})", value=stripped))
         except Exception:
             pass
 
