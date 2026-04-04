@@ -130,7 +130,7 @@ def parse_slash_datetime_input(dt_str, now):
 def parse_relative_day_input(dt_str, now):
     import re
 
-    match = re.fullmatch(r"(\d+)日後(?:\s+(.+))?", dt_str)
+    match = re.fullmatch(r"(\d+)日(?:後)?(?:\s+(.+))?", dt_str)
     if not match:
         raise ValueError("相対日付形式エラー")
 
@@ -142,7 +142,7 @@ def parse_relative_day_input(dt_str, now):
         return datetime.datetime.combine(target_date, datetime.time(0, 0), tzinfo=JST)
 
     lowered = time_part.lower()
-    if lowered in ["今", "now"]:
+    if lowered in ["今", "いま", "now"]:
         return datetime.datetime.combine(target_date, datetime.time(now.hour, now.minute), tzinfo=JST)
 
     hour, minute = parse_compact_time_value(time_part)
@@ -171,10 +171,10 @@ def parse_datetime_input(dt_str):
     if "/" in dt_str:
         return parse_slash_datetime_input(dt_str, now)
 
-    if dt_str.lower() in ["今", "now"]:
+    if dt_str.lower() in ["今", "いま", "now"]:
         raise ValueError("日付指定が必要です")
 
-    relative_day_match = re.fullmatch(r"(\d+)日後(?:\s+(.+))?", dt_str)
+    relative_day_match = re.fullmatch(r"(\d+)日(?:後)?(?:\s+(.+))?", dt_str)
     if relative_day_match:
         return parse_relative_day_input(dt_str, now)
 
@@ -563,7 +563,7 @@ def filter_accessible_tasks(task_ids, user_id, manager):
     return found_tasks, missing_ids, forbidden_ids
 
 
-def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, status=None, mine_only=False):
+def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, status=None, mine_only=False, owner_id=None):
     filtered = []
     for task in tasks_list:
         if task["guild_id"] != guild_id:
@@ -571,6 +571,8 @@ def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, sta
         if channel_id is not None and task["channel_id"] != channel_id:
             continue
         if status and task["status"] != status:
+            continue
+        if owner_id is not None and task["owner_id"] != owner_id:
             continue
         if mine_only or not manager:
             if task["owner_id"] != user_id:
@@ -735,13 +737,15 @@ async def send_task_notification_with_mentions(task, message, allowed_mentions_o
     return True
 
 
-def format_delete_log_message(executor_name, tasks_for_log):
+def format_delete_log_message(executor_name, tasks_for_log, target_owner_name=None):
     count = len(tasks_for_log)
     lines = [
         "🗑【削除】",
         f"実行者: {executor_name}",
-        f"{count}件削除",
     ]
+    if target_owner_name:
+        lines.append(f"対象: {target_owner_name}")
+    lines.append(f"{count}件削除")
 
     for task in tasks_for_log[:10]:
         due = task["due"]
@@ -755,7 +759,7 @@ def format_delete_log_message(executor_name, tasks_for_log):
     return "\n".join(lines)
 
 
-async def send_delete_log(tasks_for_log, executor_name):
+async def send_delete_log(tasks_for_log, executor_name, target_owner_name=None):
     if not tasks_for_log:
         return
 
@@ -767,7 +771,7 @@ async def send_delete_log(tasks_for_log, executor_name):
     for grouped_tasks in grouped.values():
         await send_task_notification_with_mentions(
             grouped_tasks[0],
-            format_delete_log_message(executor_name, grouped_tasks),
+            format_delete_log_message(executor_name, grouped_tasks, target_owner_name=target_owner_name),
             allowed_mentions_override=discord.AllowedMentions.none(),
         )
 
@@ -1600,6 +1604,7 @@ async def delete_bulk(
     channel: Optional[discord.TextChannel] = None,
     status: Optional[Literal["todo", "done"]] = None,
     mine_only: bool = False,
+    owner: Optional[discord.Member] = None,
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1608,6 +1613,12 @@ async def delete_bulk(
     await interaction.response.send_message("対象を確認中...", ephemeral=True)
     await run_blocking(load_tasks)
     manager = is_manager(interaction)
+    if owner is not None and not manager:
+        await interaction.edit_original_response(content="owner 指定は manager_role のみ使用できます")
+        return
+    if owner is not None and mine_only:
+        await interaction.edit_original_response(content="owner と mine_only は併用できません")
+        return
     target_tasks = get_filtered_tasks_for_user(
         interaction.guild.id,
         interaction.user.id,
@@ -1615,6 +1626,7 @@ async def delete_bulk(
         channel_id=channel.id if channel else None,
         status=status,
         mine_only=mine_only,
+        owner_id=owner.id if owner else None,
     )
 
     if not target_tasks:
@@ -1624,10 +1636,17 @@ async def delete_bulk(
     async def do_delete(tasks_to_delete, interaction_for_log):
         await run_blocking(delete_tasks_bulk, [task["id"] for task in tasks_to_delete])
         await run_blocking(load_tasks)
-        await send_delete_log(tasks_to_delete, interaction_for_log.user.display_name)
+        await send_delete_log(
+            tasks_to_delete,
+            interaction_for_log.user.display_name,
+            target_owner_name=owner.display_name if owner else None,
+        )
 
     view = BulkActionConfirmView("削除", target_tasks, do_delete)
-    lines = [f"{len(target_tasks)}件削除します。実行しますか？"]
+    if owner is not None:
+        lines = [f"{owner.display_name} のタスクを{len(target_tasks)}件削除します。実行しますか？"]
+    else:
+        lines = [f"{len(target_tasks)}件削除します。実行しますか？"]
     for task in target_tasks[:10]:
         lines.append(format_task_choice_name(task))
     if len(target_tasks) > 10:

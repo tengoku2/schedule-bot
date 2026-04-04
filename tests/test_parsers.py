@@ -83,6 +83,14 @@ class ParseDateTimeInputTests(unittest.TestCase):
         self.assertEqual(due.minute, 0)
 
     @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_days_without_after_suffix_default_to_midnight(self):
+        due = bot.parse_datetime_input("2日")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 4)
+        self.assertEqual(due.hour, 0)
+        self.assertEqual(due.minute, 0)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
     def test_relative_days_with_compact_time(self):
         due = bot.parse_datetime_input("2日後 1830")
         self.assertEqual(due.month, 4)
@@ -93,6 +101,14 @@ class ParseDateTimeInputTests(unittest.TestCase):
     @patch("bot.datetime.datetime", FixedDateTime)
     def test_relative_days_with_now_alias_uses_current_time(self):
         due = bot.parse_datetime_input("1日後 now")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 12)
+        self.assertEqual(due.minute, 0)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_days_with_hiragana_now_alias_uses_current_time(self):
+        due = bot.parse_datetime_input("1日 いま")
         self.assertEqual(due.month, 4)
         self.assertEqual(due.day, 3)
         self.assertEqual(due.hour, 12)
@@ -217,6 +233,15 @@ class DeleteLogFormattingTests(unittest.TestCase):
         self.assertEqual(
             bot.format_delete_log_message("alice", tasks),
             "🗑【削除】\n実行者: alice\n2件削除\n[7] 設計レビュー (done)\n[8] 実装確認 (todo)",
+        )
+
+    def test_format_delete_log_message_with_target_owner(self):
+        tasks = [
+            {"id": 7, "task": "設計レビュー", "status": "done", "due": datetime.datetime(2026, 4, 3, 10, 0)},
+        ]
+        self.assertEqual(
+            bot.format_delete_log_message("alice", tasks, target_owner_name="bob"),
+            "🗑【削除】\n実行者: alice\n対象: bob\n1件削除\n[7] 設計レビュー (done)",
         )
 
     def test_format_done_log_message(self):
