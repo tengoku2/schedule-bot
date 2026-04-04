@@ -875,7 +875,6 @@ class DeleteConfirmView(discord.ui.View):
             print("[delete] error:", e)
             await interaction.followup.send("削除失敗", ephemeral=True)
             return
-        await interaction.followup.send(f"削除: {self.task['task']}", ephemeral=True)
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -908,8 +907,6 @@ class BulkDeleteConfirmView(discord.ui.View):
             print("[bulk_delete] error:", e)
             await interaction.followup.send("Bulk delete failed", ephemeral=True)
             return
-        deleted_ids = ", ".join(f"[{task['id']}]" for task in self.tasks_to_delete)
-        await interaction.followup.send(f"Deleted: {deleted_ids}", ephemeral=True)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1102,6 +1099,7 @@ class TaskActionsView(discord.ui.View):
         await run_blocking(delete_tasks_bulk, [task["id"] for task in selected_tasks])
         await run_blocking(load_tasks)
         await send_delete_log(selected_tasks, interaction.user.display_name)
+        return False
 
     @discord.ui.button(label="前へ", style=discord.ButtonStyle.secondary, row=1)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1401,13 +1399,13 @@ async def delete_task_cmd(interaction: discord.Interaction, task_ids: str):
             messages.append(f"見つからないID: {', '.join(map(str, missing_ids))}")
         if forbidden_ids:
             messages.append(f"権限なしID: {', '.join(map(str, forbidden_ids))}")
-        await interaction.edit_original_response(content="\\n".join(messages) if messages else "削除対象なし")
+        await interaction.edit_original_response(content="\n".join(messages) if messages else "削除対象なし")
         return
 
     if len(target_tasks) == 1:
         task = target_tasks[0]
         view = DeleteConfirmView(task)
-        await interaction.edit_original_response(content=f"削除しますか\\n[{task['id']}] {task['task']}", view=view)
+        await interaction.edit_original_response(content=f"削除しますか\n[{task['id']}] {task['task']}", view=view)
         view.message = await interaction.original_response()
         return
 
@@ -1420,7 +1418,7 @@ async def delete_task_cmd(interaction: discord.Interaction, task_ids: str):
         lines.append(f"権限なしID: {', '.join(map(str, forbidden_ids))}")
 
     view = BulkDeleteConfirmView(target_tasks)
-    await interaction.edit_original_response(content="\\n".join(lines), view=view)
+    await interaction.edit_original_response(content="\n".join(lines), view=view)
     view.message = await interaction.original_response()
 
 
@@ -1641,6 +1639,7 @@ async def delete_bulk(
             interaction_for_log.user.display_name,
             target_owner_name=owner.display_name if owner else None,
         )
+        return False
 
     view = BulkActionConfirmView("削除", target_tasks, do_delete)
     if owner is not None:
