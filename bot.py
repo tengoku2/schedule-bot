@@ -69,12 +69,95 @@ def json_loads_or_default(value, default):
     return json.loads(value)
 
 
+def parse_compact_time_value(time_text):
+    if not time_text.isdigit():
+        raise ValueError("時間形式エラー")
+
+    if len(time_text) <= 2:
+        hour = int(time_text)
+        minute = 0
+    else:
+        hour = int(time_text[:-2])
+        minute = int(time_text[-2:])
+
+    if hour >= 24 or minute >= 60:
+        raise ValueError("時間形式エラー")
+
+    return hour, minute
+
+
+def parse_slash_datetime_input(dt_str, now):
+    parts = dt_str.split()
+    if not parts or "/" not in parts[0]:
+        raise ValueError("日付形式エラー")
+
+    date_part = parts[0]
+    time_part = parts[1] if len(parts) > 1 else ""
+
+    month_day = date_part.split("/")
+    if len(month_day) != 2:
+        raise ValueError("日付形式エラー")
+
+    month = int(month_day[0])
+    day = int(month_day[1])
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        raise ValueError("日付エラー")
+
+    if not time_part:
+        hour = 0
+        minute = 0
+    elif ":" in time_part:
+        hhmm = time_part.split(":")
+        if len(hhmm) != 2:
+            raise ValueError("時間形式エラー")
+        hour = int(hhmm[0])
+        minute = int(hhmm[1])
+        if hour >= 24 or minute >= 60:
+            raise ValueError("時間形式エラー")
+    else:
+        hour, minute = parse_compact_time_value(time_part)
+
+    try:
+        due = datetime.datetime(now.year, month, day, hour, minute, tzinfo=JST)
+    except ValueError:
+        raise ValueError("存在しない日付です")
+
+    if due <= now:
+        due = due.replace(year=now.year + 1)
+    return due
+
+
 def parse_datetime_input(dt_str):
+    import re
+
     now = datetime.datetime.now(JST)
 
     if not dt_str:
         tomorrow = now.date() + datetime.timedelta(days=1)
         return datetime.datetime.combine(tomorrow, datetime.time(0, 0), tzinfo=JST)
+
+    dt_str = dt_str.strip()
+
+    if "明日" in dt_str:
+        tomorrow = now.date() + datetime.timedelta(days=1)
+        remain = dt_str.replace("明日", "", 1).strip()
+        if not remain:
+            return datetime.datetime.combine(tomorrow, datetime.time(0, 0), tzinfo=JST)
+        hour, minute = parse_compact_time_value(remain)
+        return datetime.datetime.combine(tomorrow, datetime.time(hour, minute), tzinfo=JST)
+
+    if "/" in dt_str:
+        return parse_slash_datetime_input(dt_str, now)
+
+    relative_match = re.fullmatch(r"(\d+)\s*(分|時間|日)後", dt_str)
+    if relative_match:
+        amount = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        if unit == "分":
+            return now + datetime.timedelta(minutes=amount)
+        if unit == "時間":
+            return now + datetime.timedelta(hours=amount)
+        return now + datetime.timedelta(days=amount)
 
     if not dt_str.isdigit():
         raise ValueError("数字で入力してください")

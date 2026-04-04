@@ -41,6 +41,39 @@ class ParseDateTimeInputTests(unittest.TestCase):
         self.assertEqual(due.hour, 10)
         self.assertEqual(due.minute, 0)
 
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_tomorrow_defaults_to_midnight(self):
+        due = bot.parse_datetime_input("明日")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 0)
+        self.assertEqual(due.minute, 0)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_tomorrow_with_time_uses_next_day_absolute_time(self):
+        due = bot.parse_datetime_input("明日 824")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 3)
+        self.assertEqual(due.hour, 8)
+        self.assertEqual(due.minute, 24)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_slash_date_parses_absolute_date(self):
+        due = bot.parse_datetime_input("4/6 10:15")
+        self.assertEqual(due.year, 2026)
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 6)
+        self.assertEqual(due.hour, 10)
+        self.assertEqual(due.minute, 15)
+
+    @patch("bot.datetime.datetime", FixedDateTime)
+    def test_relative_hours_parses_from_now(self):
+        due = bot.parse_datetime_input("3時間後")
+        self.assertEqual(due.month, 4)
+        self.assertEqual(due.day, 2)
+        self.assertEqual(due.hour, 15)
+        self.assertEqual(due.minute, 0)
+
     def test_invalid_non_numeric_input(self):
         with self.assertRaises(ValueError):
             bot.parse_datetime_input("ab")
