@@ -137,6 +137,20 @@ class ParseRemindersTests(unittest.TestCase):
         self.assertEqual(parsed[2], ("1month", 30))
         self.assertEqual(parsed[3], ("2year", 730))
 
+    def test_parse_reminders_with_def_expands_defaults(self):
+        parsed = bot.parse_reminders("def,3h")
+        self.assertEqual(
+            parsed,
+            [
+                ("1month", 30),
+                ("2week", 14),
+                ("1week", 7),
+                ("3day", 3),
+                ("24hour", 1),
+                ("3hour", 3 / 24),
+            ],
+        )
+
 
 class ParseTaskIdsTests(unittest.TestCase):
     def test_parse_task_ids(self):

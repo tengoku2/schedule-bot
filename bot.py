@@ -262,6 +262,10 @@ def parse_reminders(reminder_str):
     for part in reminder_str.split(","):
         part = part.strip().lower()
 
+        if part == "def":
+            result.extend(DEFAULT_REMINDERS)
+            continue
+
         match = re.match(r"(\d+)([a-z]+)", part)
         if not match:
             raise ValueError("単位エラー")
