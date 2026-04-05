@@ -2037,6 +2037,13 @@ async def set_manager_role(interaction: discord.Interaction, role: discord.Role)
 GUILD_ID = int(os.environ.get("GUILD_ID", "1479381180146257950"))
 
 
+async def sync_guild_commands(guild):
+    guild_object = discord.Object(id=guild.id)
+    tree.copy_global_to(guild=guild_object)
+    await tree.sync(guild=guild_object)
+    print("[startup] guild sync done:", guild.id, guild.name)
+
+
 @bot.event
 async def on_ready():
     print("[startup] ready")
@@ -2046,10 +2053,7 @@ async def on_ready():
     # guild sync を使う場合は、global command を各 guild に明示的にコピーしてから同期する。
     for guild in bot.guilds:
         try:
-            guild_object = discord.Object(id=guild.id)
-            tree.copy_global_to(guild=guild_object)
-            await tree.sync(guild=guild_object)
-            print("[startup] guild sync done:", guild.id, guild.name)
+            await sync_guild_commands(guild)
         except Exception as e:
             print("[startup] guild sync error:", guild.id, e)
 
@@ -2076,6 +2080,14 @@ async def on_ready():
 
     print("[startup] reminder loop started")
     print("[startup] commands:", [c.name for c in tree.get_commands()])
+
+
+@bot.event
+async def on_guild_join(guild):
+    try:
+        await sync_guild_commands(guild)
+    except Exception as e:
+        print("[startup] guild join sync error:", guild.id, e)
 
 
 def start_bot():
