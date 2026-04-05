@@ -514,6 +514,16 @@ def append_notified(task_id, notified):
     db.close()
 
 
+def get_task_status(task_id):
+    db, cursor = get_cursor()
+    try:
+        cursor.execute("SELECT status FROM tasks WHERE id=%s", (task_id,))
+        row = cursor.fetchone()
+        return row["status"] if row else None
+    finally:
+        db.close()
+
+
 def delete_task(task_id):
     db, cursor = get_cursor()
     cursor.execute("DELETE FROM tasks WHERE id=%s", (task_id,))
@@ -1904,7 +1914,8 @@ async def reminder_loop():
             and now.minute == 0
         ):
             if today_str not in notified:
-                if task["status"] == "done":
+                current_status = await run_blocking(get_task_status, task["id"])
+                if current_status is None or current_status == "done":
                     continue
                 await send_task_notification(task, format_daily_message(task, due))
                 notified.append(today_str)
@@ -1913,7 +1924,8 @@ async def reminder_loop():
 
         notified = list(task.get("notified", []))
         if "due" not in notified and now >= due:
-            if task["status"] == "done":
+            current_status = await run_blocking(get_task_status, task["id"])
+            if current_status is None or current_status == "done":
                 continue
             await send_task_notification(task, format_due_message(task, due))
             notified.append("due")
@@ -1927,7 +1939,8 @@ async def reminder_loop():
             if label in notified:
                 continue
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
-                if task["status"] == "done":
+                current_status = await run_blocking(get_task_status, task["id"])
+                if current_status is None or current_status == "done":
                     continue
                 await send_task_notification(task, format_reminder_message(task, due, label))
                 notified.append(label)
