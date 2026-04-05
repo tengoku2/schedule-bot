@@ -81,7 +81,7 @@ def main() -> int:
         print("Tables:", ", ".join(tables))
 
         required_columns = {
-            "tasks": {"id", "task", "due", "channel_id", "notify_channel_id", "owner_id", "reminders", "notified", "status", "guild_id"},
+            "tasks": {"id", "task", "due", "channel_id", "notify_channel_id", "owner_id", "reminders", "notified", "status", "guild_id", "category"},
             "guild_settings": {"guild_id", "manager_role_id", "notify_channel_id"},
         }
 

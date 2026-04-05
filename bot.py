@@ -23,6 +23,15 @@ DEFAULT_REMINDERS = [
     ("3day", 3),
     ("24hour", 1),
 ]
+TASK_CATEGORIES = (
+    "general",
+    "composer",
+    "vocal",
+    "operations",
+    "illustration",
+    "design",
+)
+TaskCategory = Literal["general", "composer", "vocal", "operations", "illustration", "design"]
 STATUS_BULK_COOLDOWN_SECONDS = 10
 status_bulk_cooldowns = {}
 
@@ -68,6 +77,12 @@ def json_loads_or_default(value, default):
     if value in (None, ""):
         return default
     return json.loads(value)
+
+
+def normalize_task_category(category):
+    if category in TASK_CATEGORIES:
+        return category
+    return "general"
 
 
 def parse_compact_time_value(time_text):
@@ -321,7 +336,7 @@ def load_tasks():
         cursor.execute(
             """
             SELECT id, task, due, channel_id, notify_channel_id, owner_id,
-                   visible_to, reminders, notified, status, guild_id
+                   visible_to, reminders, notified, status, guild_id, category
             FROM tasks
             """
         )
@@ -339,6 +354,7 @@ def load_tasks():
                 "notified": json_loads_or_default(row["notified"], []),
                 "status": row["status"],
                 "guild_id": row["guild_id"],
+                "category": normalize_task_category(row.get("category")),
             }
             for row in rows
         ]
@@ -395,14 +411,14 @@ def get_notify_channel(guild_id):
     return get_guild_settings(guild_id).get("notify_channel_id")
 
 
-def insert_task(task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders):
+def insert_task(task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders, category):
     db, cursor = get_cursor()
     cursor.execute(
         """
         INSERT INTO tasks
         (task, due, channel_id, notify_channel_id, owner_id, visible_to, roles,
-         reminders, notified, mention, everyone, status, guild_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         reminders, notified, mention, everyone, status, guild_id, category)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             task_name,
@@ -418,21 +434,22 @@ def insert_task(task_name, due, channel_id, notify_channel_id, user_id, guild_id
             False,
             "todo",
             guild_id,
+            normalize_task_category(category),
         ),
     )
     db.commit()
     db.close()
 
 
-def update_task_full(task_id, task_name, due, reminders, notify_channel_id):
+def update_task_full(task_id, task_name, due, reminders, notify_channel_id, category):
     db, cursor = get_cursor()
     cursor.execute(
         """
         UPDATE tasks
-        SET task=%s, due=%s, reminders=%s, notify_channel_id=%s
+        SET task=%s, due=%s, reminders=%s, notify_channel_id=%s, category=%s
         WHERE id=%s
         """,
-        (task_name, due, json.dumps(reminders), notify_channel_id, task_id),
+        (task_name, due, json.dumps(reminders), notify_channel_id, normalize_task_category(category), task_id),
     )
     db.commit()
     db.close()
@@ -445,7 +462,7 @@ def update_status(task_id, status):
     db.close()
 
 
-def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders):
+def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders, category):
     lock_name = f"schedule-bot:add:{interaction_id}"
     db, cursor = get_cursor()
     try:
@@ -458,8 +475,8 @@ def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_
             """
             INSERT INTO tasks
             (task, due, channel_id, notify_channel_id, owner_id, visible_to, roles,
-             reminders, notified, mention, everyone, status, guild_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             reminders, notified, mention, everyone, status, guild_id, category)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 task_name,
@@ -475,6 +492,7 @@ def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_
                 False,
                 "todo",
                 guild_id,
+                normalize_task_category(category),
             ),
         )
         db.commit()
@@ -578,7 +596,7 @@ def filter_accessible_tasks(task_ids, user_id, manager):
     return found_tasks, missing_ids, forbidden_ids
 
 
-def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, status=None, mine_only=False, owner_id=None):
+def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, status=None, mine_only=False, owner_id=None, category=None):
     filtered = []
     for task in tasks_list:
         if task["guild_id"] != guild_id:
@@ -586,6 +604,8 @@ def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, sta
         if channel_id is not None and task["channel_id"] != channel_id:
             continue
         if status and task["status"] != status:
+            continue
+        if category and normalize_task_category(task.get("category")) != normalize_task_category(category):
             continue
         if owner_id is not None and task["owner_id"] != owner_id:
             continue
@@ -600,7 +620,8 @@ def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, sta
 
 def format_task_choice_name(task):
     task_name = str(task["task"]).replace("\n", " ").strip()
-    suffix = f"（{task['status']}）"
+    category = normalize_task_category(task.get("category"))
+    suffix = f" ({task['status']} / {category})"
     label = f"[{task['id']}] {task_name}{suffix}"
     if len(label) <= 100:
         return label
@@ -1037,7 +1058,7 @@ class TaskPickerSelect(discord.ui.Select):
 
 
 class TaskActionsView(discord.ui.View):
-    def __init__(self, tasks_for_ui, guild_id, owner_user_id, manager, channel_id=None, status_filter=None, mine_only=False):
+    def __init__(self, tasks_for_ui, guild_id, owner_user_id, manager, channel_id=None, status_filter=None, mine_only=False, category_filter=None):
         super().__init__(timeout=180)
         self.tasks_for_ui = tasks_for_ui
         self.guild_id = guild_id
@@ -1046,6 +1067,7 @@ class TaskActionsView(discord.ui.View):
         self.channel_id = channel_id
         self.status_filter = status_filter
         self.mine_only = mine_only
+        self.category_filter = category_filter
         self.page = 0
         self.selected_ids = set()
         self.message = None
@@ -1129,6 +1151,7 @@ class TaskActionsView(discord.ui.View):
             channel_id=self.channel_id,
             status=self.status_filter,
             mine_only=self.mine_only,
+            category=self.category_filter,
         )
         self.selected_ids.clear()
         self.page = min(self.page, self.total_pages() - 1)
@@ -1285,6 +1308,7 @@ async def add(
     dt_str: str = None,
     reminders: str = None,
     channel: Optional[discord.TextChannel] = None,
+    category: TaskCategory = "general",
 ):
     print("[add] start")
     print("[add] guild:", interaction.guild.id if interaction.guild else None)
@@ -1330,6 +1354,7 @@ async def add(
             interaction.user.id,
             interaction.guild.id,
             filtered,
+            category,
         )
     except Exception as e:
         print("[add] db error:", e)
@@ -1352,7 +1377,8 @@ async def add(
             f"📌 {task_name}\n"
             f"🕒 {due.strftime('%m/%d %H:%M')}\n"
             f"🔔 {reminder_text}\n"
-            f"📢 {channel_text}"
+            f"📢 {channel_text}\n"
+            f"📂 {category}"
         ),
         allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -1364,6 +1390,7 @@ async def add(
             "notify_channel_id": channel.id if channel else None,
             "owner_id": interaction.user.id,
             "guild_id": interaction.guild.id,
+            "category": category,
         },
         f"Task added: {task_name}\nDue: {due.strftime('%m/%d %H:%M')}",
         allowed_mentions_override=discord.AllowedMentions.none(),
@@ -1532,6 +1559,7 @@ async def edit_task_cmd(
     dt_str: str = None,
     reminders: str = None,
     channel: Optional[discord.TextChannel] = None,
+    category: Optional[TaskCategory] = None,
 ):
     try:
         parsed_task_id = int(task_id)
@@ -1565,6 +1593,7 @@ async def edit_task_cmd(
 
     new_name = task_name if task_name else task["task"]
     new_notify_channel_id = channel.id if channel else task.get("notify_channel_id")
+    new_category = category if category else normalize_task_category(task.get("category"))
 
     try:
         if reminders:
@@ -1583,7 +1612,7 @@ async def edit_task_cmd(
         return
 
     try:
-        await run_blocking(update_task_full, task["id"], new_name, new_due, new_reminders, new_notify_channel_id)
+        await run_blocking(update_task_full, task["id"], new_name, new_due, new_reminders, new_notify_channel_id, new_category)
         await run_blocking(load_tasks)
     except Exception as e:
         print("[edit] error:", e)
@@ -1598,7 +1627,8 @@ async def edit_task_cmd(
             f"[{parsed_task_id}] {new_name}\n"
             f"{new_due.strftime('%m/%d %H:%M')}\n"
             f"reminders: {reminder_text}\n"
-            f"channel: {channel_text}"
+            f"channel: {channel_text}\n"
+            f"category: {new_category}"
         )
     )
 
@@ -1629,6 +1659,7 @@ async def tasks_ui(
     channel: Optional[discord.TextChannel] = None,
     status: Optional[Literal["todo", "done"]] = None,
     mine_only: bool = False,
+    category: Optional[TaskCategory] = None,
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1645,6 +1676,7 @@ async def tasks_ui(
         channel_id=source_channel_id,
         status=status,
         mine_only=mine_only,
+        category=category,
     )
 
     view = TaskActionsView(
@@ -1655,6 +1687,7 @@ async def tasks_ui(
         channel_id=source_channel_id,
         status_filter=status,
         mine_only=mine_only,
+        category_filter=category,
     )
     await interaction.edit_original_response(content=view.render_content(), view=view)
     view.message = await interaction.original_response()
@@ -1811,6 +1844,7 @@ async def search_tasks(
     keyword: str,
     channel: Optional[discord.TextChannel] = None,
     mine_only: bool = False,
+    category: Optional[TaskCategory] = None,
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1825,6 +1859,7 @@ async def search_tasks(
         manager,
         channel_id=channel.id if channel else None,
         mine_only=mine_only,
+        category=category,
     )
 
     keyword_lower = keyword.strip().lower()
@@ -1850,6 +1885,7 @@ async def search_tasks(
 async def list_tasks(
     interaction: discord.Interaction,
     mode: Literal["todo", "done", "all"] = "todo",
+    category: Optional[TaskCategory] = None,
 ):
     await interaction.response.send_message("読み込み中...", ephemeral=True)
     now = datetime.datetime.now(JST)
@@ -1873,12 +1909,14 @@ async def list_tasks(
             continue
         if mode == "done" and task["status"] != "done":
             continue
+        if category and normalize_task_category(task.get("category")) != normalize_task_category(category):
+            continue
 
         due = task["due"]
         if due.tzinfo is None:
             due = due.replace(tzinfo=JST)
 
-        msg += f"{i}. [{task['id']}] {task['task']}\n"
+        msg += f"{i}. [{task['id']}] {task['task']} ({normalize_task_category(task.get('category'))})\n"
         msg += f"Due: {due.strftime('%m/%d %H:%M')}\n"
         if task.get("notify_channel_id"):
             msg += f"Notify: <#{task['notify_channel_id']}>\n"
