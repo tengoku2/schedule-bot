@@ -640,6 +640,12 @@ def is_manager(interaction):
         return False
 
 
+def can_manage_settings(interaction):
+    if interaction.user.guild_permissions.manage_guild:
+        return True
+    return is_manager(interaction)
+
+
 def is_manager_member(member, guild_settings):
     role_id = guild_settings.get("manager_role_id") if guild_settings else None
     if not member or not role_id:
@@ -1973,8 +1979,8 @@ async def set_notify_channel(interaction: discord.Interaction, channel: discord.
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
         return
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("manage_guild 権限が必要です", ephemeral=True)
+    if not can_manage_settings(interaction):
+        await interaction.response.send_message("manage_guild または manager_role が必要です", ephemeral=True)
         return
 
     db, cursor = get_cursor()
@@ -2001,8 +2007,8 @@ async def set_manager_role(interaction: discord.Interaction, role: discord.Role)
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
         return
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("manage_guild 権限が必要です", ephemeral=True)
+    if not can_manage_settings(interaction):
+        await interaction.response.send_message("manage_guild または manager_role が必要です", ephemeral=True)
         return
 
     try:
