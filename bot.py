@@ -1916,7 +1916,9 @@ async def reminder_loop():
             if today_str not in notified:
                 current_status = await run_blocking(get_task_status, task["id"])
                 if current_status is None or current_status == "done":
+                    print("[reminder] skip daily:", task["id"], current_status)
                     continue
+                print("[reminder] send daily:", task["id"], task["task"])
                 await send_task_notification(task, format_daily_message(task, due))
                 notified.append(today_str)
                 await run_blocking(append_notified, task["id"], notified)
@@ -1926,7 +1928,9 @@ async def reminder_loop():
         if "due" not in notified and now >= due:
             current_status = await run_blocking(get_task_status, task["id"])
             if current_status is None or current_status == "done":
+                print("[reminder] skip due:", task["id"], current_status)
                 continue
+            print("[reminder] send due:", task["id"], task["task"])
             await send_task_notification(task, format_due_message(task, due))
             notified.append("due")
             await run_blocking(append_notified, task["id"], notified)
@@ -1941,7 +1945,9 @@ async def reminder_loop():
             if remind_time <= now <= remind_time + datetime.timedelta(seconds=30):
                 current_status = await run_blocking(get_task_status, task["id"])
                 if current_status is None or current_status == "done":
+                    print("[reminder] skip reminder:", task["id"], label, current_status)
                     continue
+                print("[reminder] send reminder:", task["id"], label, task["task"])
                 await send_task_notification(task, format_reminder_message(task, due, label))
                 notified.append(label)
                 await run_blocking(append_notified, task["id"], notified)
