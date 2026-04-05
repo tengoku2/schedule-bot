@@ -18,11 +18,10 @@ load_dotenv()
 JST = datetime.timezone(datetime.timedelta(hours=9))
 DEFAULT_REMINDERS = [
     ("1month", 30),
-    ("2weeks", 14),
+    ("2week", 14),
     ("1week", 7),
-    ("3days", 3),
-    ("1day", 1),
-    ("3hours", 3 / 24),
+    ("3day", 3),
+    ("24hour", 1),
 ]
 STATUS_BULK_COOLDOWN_SECONDS = 10
 status_bulk_cooldowns = {}
