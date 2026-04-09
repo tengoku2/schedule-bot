@@ -554,6 +554,39 @@ def get_task_status(task_id):
         db.close()
 
 
+def get_task_by_id(task_id):
+    db, cursor = get_cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, task, due, channel_id, notify_channel_id, owner_id,
+                   visible_to, reminders, notified, status, guild_id, category
+            FROM tasks
+            WHERE id=%s
+            """,
+            (task_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "task": row["task"],
+            "due": row["due"],
+            "channel_id": row["channel_id"],
+            "notify_channel_id": row.get("notify_channel_id"),
+            "owner_id": row["owner_id"],
+            "visible_to": json_loads_or_default(row["visible_to"], []),
+            "reminders": json_loads_or_default(row["reminders"], []),
+            "notified": json_loads_or_default(row["notified"], []),
+            "status": row["status"],
+            "guild_id": row["guild_id"],
+            "category": normalize_task_category(row.get("category")),
+        }
+    finally:
+        db.close()
+
+
 def delete_task(task_id):
     db, cursor = get_cursor()
     cursor.execute("DELETE FROM tasks WHERE id=%s", (task_id,))
@@ -744,11 +777,11 @@ async def get_target_channel(channel_id):
     return None
 
 
-async def send_task_notification(task, message):
-    return await send_task_notification_with_mentions(task, message)
+async def send_task_notification(task, message, view=None):
+    return await send_task_notification_with_mentions(task, message, view=view)
 
 
-async def send_task_notification_with_mentions(task, message, allowed_mentions_override=None):
+async def send_task_notification_with_mentions(task, message, allowed_mentions_override=None, view=None):
     # 通知優先順位:
     # 1. tasks.notify_channel_id
     # 2. guild_settings.notify_channel_id
@@ -796,6 +829,7 @@ async def send_task_notification_with_mentions(task, message, allowed_mentions_o
         await channel.send(
             content,
             allowed_mentions=allowed_mentions,
+            view=view,
         )
     except Exception as e:
         print("[notify] send error:", channel_id, task.get("task"), e)
@@ -1055,6 +1089,54 @@ class BulkActionConfirmView(discord.ui.View):
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="キャンセルしました", view=None)
+
+
+class NotificationActionView(discord.ui.View):
+    def __init__(self, task_id):
+        super().__init__(timeout=86400)
+        self.task_id = task_id
+
+    async def _disable(self, interaction):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    async def _load_task_for_action(self, interaction):
+        task = await run_blocking(get_task_by_id, self.task_id)
+        if not task:
+            await interaction.response.send_message("Task not found", ephemeral=True)
+            return None
+
+        manager = is_manager(interaction)
+        if interaction.user.id != task["owner_id"] and not manager:
+            await interaction.response.send_message("Not allowed", ephemeral=True)
+            return None
+
+        if task["status"] == "done":
+            await interaction.response.send_message("Already done", ephemeral=True)
+            return None
+
+        return task
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.success)
+    async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        task = await self._load_task_for_action(interaction)
+        if not task:
+            return
+
+        await run_blocking(update_status, self.task_id, "done")
+        await run_blocking(load_tasks)
+        await send_done_log([task], interaction.user.display_name)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(label="Keep Todo", style=discord.ButtonStyle.secondary)
+    async def keep_todo_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        task = await self._load_task_for_action(interaction)
+        if not task:
+            return
+        await self._disable(interaction)
 
 
 class TaskPickerSelect(discord.ui.Select):
@@ -2035,7 +2117,7 @@ async def reminder_loop():
                 print("[reminder] skip due:", task["id"], current_status)
                 continue
             print("[reminder] send due:", task["id"], task["task"])
-            await send_task_notification(task, format_due_message(task, due))
+            await send_task_notification(task, format_due_message(task, due), view=NotificationActionView(task["id"]))
             notified.append("due")
             await run_blocking(append_notified, task["id"], notified)
             task["notified"] = notified
@@ -2052,7 +2134,7 @@ async def reminder_loop():
                     print("[reminder] skip reminder:", task["id"], label, current_status)
                     continue
                 print("[reminder] send reminder:", task["id"], label, task["task"])
-                await send_task_notification(task, format_reminder_message(task, due, label))
+                await send_task_notification(task, format_reminder_message(task, due, label), view=NotificationActionView(task["id"]))
                 notified.append(label)
                 await run_blocking(append_notified, task["id"], notified)
                 task["notified"] = notified
