@@ -176,6 +176,12 @@ class SortTasksTests(unittest.TestCase):
         sorted_tasks = bot.sort_tasks(tasks, "category", "asc")
         self.assertEqual([task["id"] for task in sorted_tasks], [2, 1])
 
+
+class TaskGuildValidationTests(unittest.TestCase):
+    def test_is_valid_task_guild_rejects_zero(self):
+        task = {"id": 1, "guild_id": 0, "task": "ghost"}
+        self.assertFalse(bot.is_valid_task_guild(task))
+
     def test_get_filtered_tasks_for_user_allows_manager_scope(self):
         original = bot.tasks_list
         try:

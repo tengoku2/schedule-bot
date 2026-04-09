@@ -94,6 +94,13 @@ def normalize_due(due):
     return due
 
 
+def is_valid_task_guild(task):
+    guild_id = task.get("guild_id")
+    if not guild_id:
+        return False
+    return bot.get_guild(guild_id) is not None
+
+
 def parse_compact_time_value(time_text):
     if not time_text.isdigit():
         raise ValueError("時間形式エラー")
@@ -786,6 +793,10 @@ async def send_task_notification_with_mentions(task, message, allowed_mentions_o
     # 1. tasks.notify_channel_id
     # 2. guild_settings.notify_channel_id
     # 3. channel_id
+    if not is_valid_task_guild(task):
+        print("[notify] invalid guild:", task.get("id"), task.get("guild_id"), task.get("task"))
+        return False
+
     channel_id = resolve_notification_channel_id(task)
     channel = await get_target_channel(channel_id)
     if not channel:
@@ -2083,6 +2094,9 @@ async def reminder_loop():
 
     for task in tasks_list:
         if task["status"] == "done":
+            continue
+        if not is_valid_task_guild(task):
+            print("[reminder] skip invalid guild:", task["id"], task.get("guild_id"), task["task"])
             continue
 
         due = task["due"]
