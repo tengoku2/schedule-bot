@@ -32,6 +32,9 @@ TASK_CATEGORIES = (
     "design",
 )
 TaskCategory = Literal["general", "composer", "vocal", "operations", "illustration", "design"]
+TaskSortBy = Literal["due", "task", "category", "status"]
+TaskSortOrder = Literal["asc", "desc"]
+TaskGroupBy = Literal["none", "category", "due_date"]
 STATUS_BULK_COOLDOWN_SECONDS = 10
 status_bulk_cooldowns = {}
 
@@ -83,6 +86,12 @@ def normalize_task_category(category):
     if category in TASK_CATEGORIES:
         return category
     return "general"
+
+
+def normalize_due(due):
+    if due.tzinfo is None:
+        return due.replace(tzinfo=JST)
+    return due
 
 
 def parse_compact_time_value(time_text):
@@ -614,14 +623,30 @@ def get_filtered_tasks_for_user(guild_id, user_id, manager, channel_id=None, sta
                 continue
         filtered.append(task)
 
-    filtered.sort(key=lambda task: (task["status"] == "done", task["due"], task["id"]))
     return filtered
+
+
+def sort_tasks(tasks, sort_by="due", order="asc"):
+    reverse = order == "desc"
+
+    def sort_key(task):
+        due = normalize_due(task["due"])
+        if sort_by == "task":
+            return (str(task["task"]).lower(), due, task["id"])
+        if sort_by == "category":
+            return (normalize_task_category(task.get("category")), due, task["id"])
+        if sort_by == "status":
+            return (task["status"] != "todo", due, task["id"])
+        return (due, task["id"])
+
+    return sorted(tasks, key=sort_key, reverse=reverse)
 
 
 def format_task_choice_name(task):
     task_name = str(task["task"]).replace("\n", " ").strip()
     category = normalize_task_category(task.get("category"))
-    suffix = f" ({task['status']} / {category})"
+    due = normalize_due(task["due"]).strftime("%m/%d %H:%M")
+    suffix = f" ({task['status']} / {category} / {due})"
     label = f"[{task['id']}] {task_name}{suffix}"
     if len(label) <= 100:
         return label
@@ -1058,7 +1083,7 @@ class TaskPickerSelect(discord.ui.Select):
 
 
 class TaskActionsView(discord.ui.View):
-    def __init__(self, tasks_for_ui, guild_id, owner_user_id, manager, channel_id=None, status_filter=None, mine_only=False, category_filter=None):
+    def __init__(self, tasks_for_ui, guild_id, owner_user_id, manager, channel_id=None, status_filter=None, mine_only=False, category_filter=None, sort_by="due", order="asc", group_by="none"):
         super().__init__(timeout=180)
         self.tasks_for_ui = tasks_for_ui
         self.guild_id = guild_id
@@ -1068,6 +1093,9 @@ class TaskActionsView(discord.ui.View):
         self.status_filter = status_filter
         self.mine_only = mine_only
         self.category_filter = category_filter
+        self.sort_by = sort_by
+        self.order = order
+        self.group_by = group_by
         self.page = 0
         self.selected_ids = set()
         self.message = None
@@ -1091,16 +1119,31 @@ class TaskActionsView(discord.ui.View):
     def render_content(self):
         page_tasks = self.current_page_tasks()
         lines = [
-            f"タスク操作 UI ({self.page + 1}/{self.total_pages()})",
-            f"選択中: {len(self.selected_ids)}件",
+            f"Task UI ({self.page + 1}/{self.total_pages()})",
+            f"Selected: {len(self.selected_ids)}",
+            f"sort: {self.sort_by} ({self.order}) / group: {self.group_by}",
             "",
         ]
         if not page_tasks:
-            lines.append("対象タスクがありません")
+            lines.append("No tasks")
             return "\n".join(lines)
 
+        current_group = None
         for task in page_tasks:
-            marker = "☑" if task["id"] in self.selected_ids else "☐"
+            if self.group_by == "category":
+                group_label = f"[{normalize_task_category(task.get('category'))}]"
+            elif self.group_by == "due_date":
+                group_label = f"[{normalize_due(task['due']).strftime('%m/%d')}]"
+            else:
+                group_label = None
+
+            if group_label and group_label != current_group:
+                if current_group is not None:
+                    lines.append("")
+                lines.append(group_label)
+                current_group = group_label
+
+            marker = "[x]" if task["id"] in self.selected_ids else "[ ]"
             lines.append(f"{marker} {format_task_choice_name(task)}")
         return "\n".join(lines)
 
@@ -1153,6 +1196,7 @@ class TaskActionsView(discord.ui.View):
             mine_only=self.mine_only,
             category=self.category_filter,
         )
+        self.tasks_for_ui = sort_tasks(self.tasks_for_ui, self.sort_by, self.order)
         self.selected_ids.clear()
         self.page = min(self.page, self.total_pages() - 1)
         try:
@@ -1660,6 +1704,9 @@ async def tasks_ui(
     status: Optional[Literal["todo", "done"]] = None,
     mine_only: bool = False,
     category: Optional[TaskCategory] = None,
+    sort_by: TaskSortBy = "due",
+    order: TaskSortOrder = "asc",
+    group_by: TaskGroupBy = "none",
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1678,6 +1725,7 @@ async def tasks_ui(
         mine_only=mine_only,
         category=category,
     )
+    filtered_tasks = sort_tasks(filtered_tasks, sort_by, order)
 
     view = TaskActionsView(
         filtered_tasks,
@@ -1688,6 +1736,9 @@ async def tasks_ui(
         status_filter=status,
         mine_only=mine_only,
         category_filter=category,
+        sort_by=sort_by,
+        order=order,
+        group_by=group_by,
     )
     await interaction.edit_original_response(content=view.render_content(), view=view)
     view.message = await interaction.original_response()
@@ -1845,6 +1896,8 @@ async def search_tasks(
     channel: Optional[discord.TextChannel] = None,
     mine_only: bool = False,
     category: Optional[TaskCategory] = None,
+    sort_by: TaskSortBy = "due",
+    order: TaskSortOrder = "asc",
 ):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で使ってください", ephemeral=True)
@@ -1864,6 +1917,7 @@ async def search_tasks(
 
     keyword_lower = keyword.strip().lower()
     results = [task for task in candidates if keyword_lower in str(task["task"]).lower()]
+    results = sort_tasks(results, sort_by, order)
 
     if not results:
         await interaction.edit_original_response(content="一致するタスクはありません")
@@ -1881,25 +1935,26 @@ async def search_tasks(
     )
 
 
-@tree.command(name="list", description="タスク一覧")
+@tree.command(name="list", description="Task list")
 async def list_tasks(
     interaction: discord.Interaction,
     mode: Literal["todo", "done", "all"] = "todo",
     category: Optional[TaskCategory] = None,
+    sort_by: TaskSortBy = "due",
+    order: TaskSortOrder = "asc",
 ):
-    await interaction.response.send_message("読み込み中...", ephemeral=True)
+    await interaction.response.send_message("Loading...", ephemeral=True)
     now = datetime.datetime.now(JST)
     await run_blocking(load_tasks)
 
     if not tasks_list:
-        await interaction.edit_original_response(content="タスクなし")
+        await interaction.edit_original_response(content="No tasks")
         return
     if not interaction.guild:
-        await interaction.edit_original_response(content="サーバー内で使ってください")
+        await interaction.edit_original_response(content="Use this command in a server")
         return
 
-    msg = f"タスク一覧 ({mode})\n"
-    i = 1
+    filtered_tasks = []
     for task in tasks_list:
         if task["guild_id"] != interaction.guild.id:
             continue
@@ -1911,11 +1966,13 @@ async def list_tasks(
             continue
         if category and normalize_task_category(task.get("category")) != normalize_task_category(category):
             continue
+        filtered_tasks.append(task)
 
-        due = task["due"]
-        if due.tzinfo is None:
-            due = due.replace(tzinfo=JST)
-
+    filtered_tasks = sort_tasks(filtered_tasks, sort_by, order)
+    msg = f"Task list ({mode}) / sort: {sort_by} ({order})\n"
+    i = 1
+    for task in filtered_tasks:
+        due = normalize_due(task["due"])
         msg += f"{i}. [{task['id']}] {task['task']} ({normalize_task_category(task.get('category'))})\n"
         msg += f"Due: {due.strftime('%m/%d %H:%M')}\n"
         if task.get("notify_channel_id"):

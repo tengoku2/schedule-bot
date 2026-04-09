@@ -132,7 +132,7 @@ class TaskChoiceFormattingTests(unittest.TestCase):
             "category": "composer",
             "due": datetime.datetime(2026, 4, 3, 9, 30),
         }
-        self.assertEqual(bot.format_task_choice_name(task), "[12] sample (todo / composer)")
+        self.assertEqual(bot.format_task_choice_name(task), "[12] sample (todo / composer / 04/03 09:30)")
 
     def test_filter_task_choices_matches_id_and_name(self):
         tasks = [
@@ -156,6 +156,25 @@ class FilteredTasksTests(unittest.TestCase):
             self.assertEqual([task["id"] for task in tasks], [1])
         finally:
             bot.tasks_list = original
+
+
+class SortTasksTests(unittest.TestCase):
+    def test_sort_tasks_by_task_desc(self):
+        tasks = [
+            {"id": 1, "task": "alpha", "status": "todo", "category": "general", "due": datetime.datetime(2026, 4, 3, 9, 0)},
+            {"id": 2, "task": "gamma", "status": "todo", "category": "general", "due": datetime.datetime(2026, 4, 3, 8, 0)},
+            {"id": 3, "task": "beta", "status": "todo", "category": "general", "due": datetime.datetime(2026, 4, 3, 7, 0)},
+        ]
+        sorted_tasks = bot.sort_tasks(tasks, "task", "desc")
+        self.assertEqual([task["id"] for task in sorted_tasks], [2, 3, 1])
+
+    def test_sort_tasks_by_category(self):
+        tasks = [
+            {"id": 1, "task": "a", "status": "todo", "category": "vocal", "due": datetime.datetime(2026, 4, 3, 9, 0)},
+            {"id": 2, "task": "b", "status": "todo", "category": "composer", "due": datetime.datetime(2026, 4, 3, 8, 0)},
+        ]
+        sorted_tasks = bot.sort_tasks(tasks, "category", "asc")
+        self.assertEqual([task["id"] for task in sorted_tasks], [2, 1])
 
     def test_get_filtered_tasks_for_user_allows_manager_scope(self):
         original = bot.tasks_list
