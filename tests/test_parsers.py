@@ -114,6 +114,22 @@ class ParseRemindersTests(unittest.TestCase):
         )
 
 
+class ParseLoopIntervalTests(unittest.TestCase):
+    def test_parse_loop_interval_aliases_and_short_units(self):
+        self.assertEqual(bot.parse_loop_interval("1d"), 1440)
+        self.assertEqual(bot.parse_loop_interval("毎日"), 1440)
+        self.assertEqual(bot.parse_loop_interval("2d"), 2880)
+        self.assertEqual(bot.parse_loop_interval("1w"), 10080)
+        self.assertEqual(bot.parse_loop_interval("毎週"), 10080)
+        self.assertEqual(bot.parse_loop_interval("1h"), 60)
+
+    def test_loop_interval_to_text(self):
+        self.assertEqual(bot.loop_interval_to_text(1440), "毎日")
+        self.assertEqual(bot.loop_interval_to_text(2880), "2日おき")
+        self.assertEqual(bot.loop_interval_to_text(10080), "1週間おき")
+        self.assertEqual(bot.loop_interval_to_text(60), "1時間おき")
+
+
 class ParseTaskIdsTests(unittest.TestCase):
     def test_parse_task_ids(self):
         self.assertEqual(bot.parse_task_ids("1,2, 3"), [1, 2, 3])

@@ -24,7 +24,8 @@ Run `db/schema.sql` against your MySQL server.
 If you already have an existing database, also apply the migration in
 `db/migrations/20260402_add_task_notify_channel.sql`,
 `db/migrations/20260404_add_task_priority_and_updated_at.sql`,
-and `db/migrations/20260405_add_task_category.sql`.
+`db/migrations/20260405_add_task_category.sql`,
+and `db/migrations/20260415_add_loop_reminder_columns.sql`.
 
 Example:
 
@@ -48,6 +49,7 @@ pytest
 - required tables existence
 - required column existence, including `tasks.notify_channel_id`
 - required column existence, including `tasks.category`
+- required column existence, including loop reminder columns
 
 ## 5. Start the bot
 

@@ -312,6 +312,58 @@ def parse_reminders(reminder_str):
     return result
 
 
+def parse_loop_interval(interval_text):
+    import re
+
+    if not interval_text:
+        raise ValueError("loop interval required")
+
+    text = interval_text.strip().lower()
+    aliases = {
+        "\u6bce\u65e5": 1440,
+        "\u6bce\u9031": 10080,
+        "daily": 1440,
+        "weekly": 10080,
+    }
+    if text in aliases:
+        return aliases[text]
+
+    match = re.fullmatch(r"(\d+)\s*(m|h|d|w|mo)", text)
+    if not match:
+        raise ValueError("invalid loop interval")
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    factor = {
+        "m": 1,
+        "h": 60,
+        "d": 1440,
+        "w": 10080,
+        "mo": 43200,
+    }[unit]
+    return amount * factor
+
+
+def loop_interval_to_text(interval_minutes):
+    if interval_minutes == 1440:
+        return "毎日"
+    if interval_minutes == 10080:
+        return "1週間おき"
+    if interval_minutes % 43200 == 0:
+        months = interval_minutes // 43200
+        return "毎月" if months == 1 else f"{months}ヶ月おき"
+    if interval_minutes % 10080 == 0:
+        weeks = interval_minutes // 10080
+        return "毎週" if weeks == 1 else f"{weeks}週間おき"
+    if interval_minutes % 1440 == 0:
+        days = interval_minutes // 1440
+        return "毎日" if days == 1 else f"{days}日おき"
+    if interval_minutes % 60 == 0:
+        hours = interval_minutes // 60
+        return "1時間おき" if hours == 1 else f"{hours}時間おき"
+    return f"{interval_minutes}分おき"
+
+
 def label_to_text(label):
     import re
 
@@ -352,7 +404,8 @@ def load_tasks():
         cursor.execute(
             """
             SELECT id, task, due, channel_id, notify_channel_id, owner_id,
-                   visible_to, reminders, notified, status, guild_id, category
+                   visible_to, reminders, notified, status, guild_id, category,
+                   loop_remind_start, loop_remind_interval_minutes, loop_remind_last_sent_at
             FROM tasks
             """
         )
@@ -371,6 +424,9 @@ def load_tasks():
                 "status": row["status"],
                 "guild_id": row["guild_id"],
                 "category": normalize_task_category(row.get("category")),
+                "loop_remind_start": row.get("loop_remind_start"),
+                "loop_remind_interval_minutes": row.get("loop_remind_interval_minutes"),
+                "loop_remind_last_sent_at": row.get("loop_remind_last_sent_at"),
             }
             for row in rows
         ]
@@ -551,6 +607,36 @@ def append_notified(task_id, notified):
     db.close()
 
 
+def update_loop_remind(task_id, start_dt, interval_minutes):
+    db, cursor = get_cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE tasks
+            SET loop_remind_start=%s,
+                loop_remind_interval_minutes=%s,
+                loop_remind_last_sent_at=NULL
+            WHERE id=%s
+            """,
+            (start_dt, interval_minutes, task_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def update_loop_remind_last_sent(task_id, sent_at):
+    db, cursor = get_cursor()
+    try:
+        cursor.execute(
+            "UPDATE tasks SET loop_remind_last_sent_at=%s WHERE id=%s",
+            (sent_at, task_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def get_task_status(task_id):
     db, cursor = get_cursor()
     try:
@@ -567,7 +653,8 @@ def get_task_by_id(task_id):
         cursor.execute(
             """
             SELECT id, task, due, channel_id, notify_channel_id, owner_id,
-                   visible_to, reminders, notified, status, guild_id, category
+                   visible_to, reminders, notified, status, guild_id, category,
+                   loop_remind_start, loop_remind_interval_minutes, loop_remind_last_sent_at
             FROM tasks
             WHERE id=%s
             """,
@@ -589,6 +676,9 @@ def get_task_by_id(task_id):
             "status": row["status"],
             "guild_id": row["guild_id"],
             "category": normalize_task_category(row.get("category")),
+            "loop_remind_start": row.get("loop_remind_start"),
+            "loop_remind_interval_minutes": row.get("loop_remind_interval_minutes"),
+            "loop_remind_last_sent_at": row.get("loop_remind_last_sent_at"),
         }
     finally:
         db.close()
@@ -996,6 +1086,14 @@ def format_daily_message(task, due):
         "🌙【未完了タスク】\n"
         f"📌 {task['task']}\n"
         f"🕒 {due.strftime('%m/%d %H:%M')}（期限切れ）"
+    )
+
+
+def format_loop_reminder_message(task, due, interval_minutes):
+    return (
+        f"🔁【ループ通知（{loop_interval_to_text(interval_minutes)}）】\n"
+        f"📌 {task['task']}\n"
+        f"🕒 {due.strftime('%m/%d %H:%M')}"
     )
 
 
@@ -1790,6 +1888,82 @@ async def edit_dt_autocomplete(interaction: discord.Interaction, current: str):
     return await add_dt_autocomplete(interaction, current)
 
 
+@tree.command(name="loop_remind", description="Loop reminder")
+async def loop_remind_cmd(
+    interaction: discord.Interaction,
+    task_id: str,
+    start_dt: str,
+    interval: str,
+):
+    try:
+        parsed_task_id = int(task_id)
+    except ValueError:
+        await interaction.response.send_message("task_id must be numeric", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Setting loop reminder...", ephemeral=True)
+    await run_blocking(load_tasks)
+    task = next((t for t in tasks_list if t["id"] == parsed_task_id), None)
+    if not task:
+        await interaction.edit_original_response(content="Task not found")
+        return
+    if not (interaction.user.id == task["owner_id"] or is_manager(interaction)):
+        await interaction.edit_original_response(content="Not allowed")
+        return
+
+    try:
+        start_due = parse_datetime_input(start_dt)
+    except Exception:
+        await interaction.edit_original_response(content="Invalid start datetime")
+        return
+
+    try:
+        interval_minutes = parse_loop_interval(interval)
+    except Exception:
+        await interaction.edit_original_response(content="Invalid interval")
+        return
+
+    await run_blocking(update_loop_remind, parsed_task_id, start_due, interval_minutes)
+    await run_blocking(load_tasks)
+    await interaction.edit_original_response(
+        content=(
+            f"Loop reminder set\n"
+            f"[{parsed_task_id}] {task['task']}\n"
+            f"start: {start_due.strftime('%m/%d %H:%M')}\n"
+            f"interval: {loop_interval_to_text(interval_minutes)}"
+        )
+    )
+
+
+@loop_remind_cmd.autocomplete("task_id")
+async def loop_remind_task_id_autocomplete(interaction: discord.Interaction, current: str):
+    return await edit_task_id_autocomplete(interaction, current)
+
+
+@loop_remind_cmd.autocomplete("start_dt")
+async def loop_remind_start_dt_autocomplete(interaction: discord.Interaction, current: str):
+    return await add_dt_autocomplete(interaction, current)
+
+
+@loop_remind_cmd.autocomplete("interval")
+async def loop_remind_interval_autocomplete(interaction: discord.Interaction, current: str):
+    candidates = [
+        ("\u6bce\u65e5", "\u6bce\u65e5"),
+        ("\u6bce\u9031", "\u6bce\u9031"),
+        ("1d", "1d"),
+        ("2d", "2d"),
+        ("1w", "1w"),
+        ("1h", "1h"),
+    ]
+    query = (current or "").strip().lower()
+    choices = []
+    for name, value in candidates:
+        if query and query not in name.lower() and query not in value.lower():
+            continue
+        choices.append(app_commands.Choice(name=f"{value} -> {name}", value=value))
+    return choices[:25]
+
+
 @tree.command(name="tasks", description="タスクを UI で操作")
 async def tasks_ui(
     interaction: discord.Interaction,
@@ -2105,6 +2279,32 @@ async def reminder_loop():
 
         notified = list(task.get("notified", []))
         today_str = now.strftime("%Y-%m-%d")
+
+        loop_start = task.get("loop_remind_start")
+        loop_interval_minutes = task.get("loop_remind_interval_minutes")
+        loop_last_sent_at = task.get("loop_remind_last_sent_at")
+        if loop_start and loop_interval_minutes:
+            loop_start = normalize_due(loop_start)
+            if loop_last_sent_at is not None:
+                loop_last_sent_at = normalize_due(loop_last_sent_at)
+            if now >= loop_start:
+                interval_delta = datetime.timedelta(minutes=loop_interval_minutes)
+                elapsed = now - loop_start
+                interval_index = int(elapsed.total_seconds() // interval_delta.total_seconds())
+                scheduled_time = loop_start + (interval_delta * interval_index)
+                if loop_last_sent_at is None or loop_last_sent_at < scheduled_time:
+                    current_status = await run_blocking(get_task_status, task["id"])
+                    if current_status is None or current_status == "done":
+                        print("[reminder] skip loop:", task["id"], current_status)
+                    else:
+                        print("[reminder] send loop:", task["id"], task["task"], scheduled_time)
+                        await send_task_notification(
+                            task,
+                            format_loop_reminder_message(task, due, loop_interval_minutes),
+                            view=NotificationActionView(task["id"]),
+                        )
+                        await run_blocking(update_loop_remind_last_sent, task["id"], scheduled_time)
+                        task["loop_remind_last_sent_at"] = scheduled_time
 
         if (
             task["status"] != "done"
