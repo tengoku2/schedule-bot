@@ -534,7 +534,7 @@ def update_status(task_id, status):
     db.close()
 
 
-def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders, category):
+def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_id, user_id, guild_id, reminders, category, loop_start=None, loop_interval_minutes=None):
     lock_name = f"schedule-bot:add:{interaction_id}"
     db, cursor = get_cursor()
     try:
@@ -547,8 +547,9 @@ def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_
             """
             INSERT INTO tasks
             (task, due, channel_id, notify_channel_id, owner_id, visible_to, roles,
-             reminders, notified, mention, everyone, status, guild_id, category)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             reminders, notified, mention, everyone, status, guild_id, category,
+             loop_remind_start, loop_remind_interval_minutes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 task_name,
@@ -565,6 +566,8 @@ def insert_task_once(interaction_id, task_name, due, channel_id, notify_channel_
                 "todo",
                 guild_id,
                 normalize_task_category(category),
+                loop_start,
+                loop_interval_minutes,
             ),
         )
         db.commit()
@@ -1544,6 +1547,8 @@ async def add(
     reminders: str = None,
     channel: Optional[discord.TextChannel] = None,
     category: TaskCategory = "general",
+    loop_start: str = None,
+    loop_interval: str = None,
 ):
     print("[add] start")
     print("[add] guild:", interaction.guild.id if interaction.guild else None)
@@ -1572,6 +1577,24 @@ async def add(
         await interaction.edit_original_response(content="リマインド形式エラー")
         return
 
+    if bool(loop_start) != bool(loop_interval):
+        await interaction.edit_original_response(content="loop_start and loop_interval must be set together")
+        return
+
+    parsed_loop_start = None
+    parsed_loop_interval = None
+    if loop_start and loop_interval:
+        try:
+            parsed_loop_start = parse_datetime_input(loop_start)
+        except Exception:
+            await interaction.edit_original_response(content="Invalid loop_start")
+            return
+        try:
+            parsed_loop_interval = parse_loop_interval(loop_interval)
+        except Exception:
+            await interaction.edit_original_response(content="Invalid loop_interval")
+            return
+
     filtered = []
     for label, days in reminder_data:
         remind_time = due - datetime.timedelta(days=days)
@@ -1590,30 +1613,38 @@ async def add(
             interaction.guild.id,
             filtered,
             category,
+            parsed_loop_start,
+            parsed_loop_interval,
         )
     except Exception as e:
         print("[add] db error:", e)
-        await interaction.edit_original_response(content="DBエラー")
+        await interaction.edit_original_response(content="DB error")
         return
 
     if inserted is not True:
         await interaction.edit_original_response(
-            content="この追加操作はすでに処理されています",
+            content="Duplicate add request ignored",
             allowed_mentions=discord.AllowedMentions.none(),
         )
         return
 
-    reminder_text = ", ".join(label_to_text(r["label"]) for r in filtered) if filtered else "なし"
-    channel_text = f"<#{channel.id}>" if channel else "デフォルト"
+    reminder_text = ", ".join(label_to_text(r["label"]) for r in filtered) if filtered else "none"
+    channel_text = f"<#{channel.id}>" if channel else "default"
+    loop_text = (
+        f"{parsed_loop_start.strftime('%m/%d %H:%M')} / {loop_interval_to_text(parsed_loop_interval)}"
+        if parsed_loop_start and parsed_loop_interval
+        else "off"
+    )
 
     await interaction.edit_original_response(
         content=(
-            "✅ タスク追加\n"
-            f"📌 {task_name}\n"
-            f"🕒 {due.strftime('%m/%d %H:%M')}\n"
-            f"🔔 {reminder_text}\n"
-            f"📢 {channel_text}\n"
-            f"📂 {category}"
+            f"Added\n"
+            f"task: {task_name}\n"
+            f"due: {due.strftime('%m/%d %H:%M')}\n"
+            f"reminders: {reminder_text}\n"
+            f"channel: {channel_text}\n"
+            f"category: {category}\n"
+            f"loop: {loop_text}"
         ),
         allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -1703,6 +1734,16 @@ async def add_dt_autocomplete(interaction: discord.Interaction, current: str):
         seen.add(key)
         deduped.append(choice)
     return deduped[:25]
+
+
+@add.autocomplete("loop_start")
+async def add_loop_start_autocomplete(interaction: discord.Interaction, current: str):
+    return await add_dt_autocomplete(interaction, current)
+
+
+@add.autocomplete("loop_interval")
+async def add_loop_interval_autocomplete(interaction: discord.Interaction, current: str):
+    return await loop_remind_interval_autocomplete(interaction, current)
 
 
 @tree.command(name="delete", description="タスク削除")
@@ -1795,6 +1836,8 @@ async def edit_task_cmd(
     reminders: str = None,
     channel: Optional[discord.TextChannel] = None,
     category: Optional[TaskCategory] = None,
+    loop_start: str = None,
+    loop_interval: str = None,
 ):
     try:
         parsed_task_id = int(task_id)
@@ -1846,8 +1889,27 @@ async def edit_task_cmd(
         await interaction.edit_original_response(content="日時形式エラー")
         return
 
+    if bool(loop_start) != bool(loop_interval):
+        await interaction.edit_original_response(content="loop_start and loop_interval must be set together")
+        return
+
+    new_loop_start = task.get("loop_remind_start")
+    new_loop_interval = task.get("loop_remind_interval_minutes")
+    if loop_start and loop_interval:
+        try:
+            new_loop_start = parse_datetime_input(loop_start)
+        except Exception:
+            await interaction.edit_original_response(content="Invalid loop_start")
+            return
+        try:
+            new_loop_interval = parse_loop_interval(loop_interval)
+        except Exception:
+            await interaction.edit_original_response(content="Invalid loop_interval")
+            return
+
     try:
         await run_blocking(update_task_full, task["id"], new_name, new_due, new_reminders, new_notify_channel_id, new_category)
+        await run_blocking(update_loop_remind, task["id"], new_loop_start, new_loop_interval)
         await run_blocking(load_tasks)
     except Exception as e:
         print("[edit] error:", e)
@@ -1856,6 +1918,12 @@ async def edit_task_cmd(
 
     reminder_text = ", ".join(r["label"] for r in new_reminders) if new_reminders else "none"
     channel_text = f"<#{new_notify_channel_id}>" if new_notify_channel_id else "inherit from guild/default"
+    loop_text = (
+        f"{new_loop_start.strftime('%m/%d %H:%M')} / {loop_interval_to_text(new_loop_interval)}"
+        if new_loop_start and new_loop_interval
+        else "off"
+    )
+
     await interaction.edit_original_response(
         content=(
             f"Updated\n"
@@ -1863,7 +1931,8 @@ async def edit_task_cmd(
             f"{new_due.strftime('%m/%d %H:%M')}\n"
             f"reminders: {reminder_text}\n"
             f"channel: {channel_text}\n"
-            f"category: {new_category}"
+            f"category: {new_category}\n"
+            f"loop: {loop_text}"
         )
     )
 
@@ -1886,6 +1955,16 @@ async def edit_task_id_autocomplete(interaction: discord.Interaction, current: s
 @edit_task_cmd.autocomplete("dt_str")
 async def edit_dt_autocomplete(interaction: discord.Interaction, current: str):
     return await add_dt_autocomplete(interaction, current)
+
+
+@edit_task_cmd.autocomplete("loop_start")
+async def edit_loop_start_autocomplete(interaction: discord.Interaction, current: str):
+    return await add_dt_autocomplete(interaction, current)
+
+
+@edit_task_cmd.autocomplete("loop_interval")
+async def edit_loop_interval_autocomplete(interaction: discord.Interaction, current: str):
+    return await loop_remind_interval_autocomplete(interaction, current)
 
 
 @tree.command(name="loop_remind", description="Loop reminder")
